@@ -57,3 +57,32 @@ class TestSpeakingRateWpm:
 
         features = ProsodyAnalyzer().analyze(transcript, audio_duration_sec=5.0)
         assert features.speaking_rate_wpm == 120.0
+
+
+class TestFillerRate:
+    def test_filler_rate_counts_unigrams_and_bigrams_case_insensitive(self) -> None:
+        """20 words, 4 fillers (3 unigrams + 1 bigram) = filler_rate 0.20.
+
+        Verifies (a) case-insensitive unigram match, (b) bigram detection
+        for "you know", (c) the bigram counts as one filler regardless of
+        which word is examined."""
+        from vsa.features.prosody import ProsodyAnalyzer
+
+        # Build a 20-word transcript. Fillers placed at fixed positions:
+        #   - "Um"  at index 0  (case-insensitive unigram)
+        #   - "uh"  at index 5  (unigram)
+        #   - "Like" at index 10 (case-insensitive unigram)
+        #   - "you know" bigram at indices 15-16 (counts as 1 filler)
+        # The bigram "you know" should be counted once, not twice — i.e.
+        # 4 filler slots in 20 words = 0.20.
+        raw = [
+            "Um",     "the",   "rain",   "in",     "Spain",
+            "uh",     "falls", "mainly", "on",     "the",
+            "Like",   "the",   "plain",  "and",    "also",
+            "you",    "know",  "the",    "hills",  "elsewhere",
+        ]
+        words = [(w, float(i), float(i) + 0.4) for i, w in enumerate(raw)]
+        transcript = _make_transcript(words)
+
+        features = ProsodyAnalyzer().analyze(transcript, audio_duration_sec=20.0)
+        assert features.filler_rate == 4 / 20
