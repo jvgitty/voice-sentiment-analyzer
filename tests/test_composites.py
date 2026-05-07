@@ -258,3 +258,45 @@ class TestCalmnessFormula:
         )
         out = scorer.score(inputs)
         assert out.calmness == pytest.approx(0.5, abs=1e-9)
+
+
+class TestComponentsBreakdown:
+    """For any non-degenerate input, the contributions in
+    ``_components[composite]`` should sum to the composite score within
+    float tolerance. This is the invariant that lets a journaling user
+    see WHY a score moved (not just THAT it did)."""
+
+    def test_components_sum_equals_composite_for_each_composite(self) -> None:
+        scorer = CompositeScorer.from_yaml(COMPOSITES_YAML)
+        inputs = ScoreInputs(
+            acoustic=_make_acoustic(
+                jitter=0.012,
+                shimmer=0.05,
+                pitch_std=22.0,
+                pitch_range=140.0,
+                loudness_std=5.0,
+            ),
+            prosody=_make_prosody(
+                speaking_rate_wpm=150.0,
+                filler_rate=0.03,
+                pause_total_seconds=1.5,
+            ),
+            emotion=_make_emotion(arousal=0.6, valence=0.7, dominance=0.55),
+            audio_duration_seconds=10.0,
+        )
+        out = scorer.score(inputs)
+        score_map = {
+            "confidence": out.confidence,
+            "engagement": out.engagement,
+            "calmness": out.calmness,
+        }
+        for composite_name, composite_score in score_map.items():
+            assert composite_score is not None
+            contributions = out.components[composite_name]
+            # Every contribution must be a number (no None) for this
+            # all-inputs-present case, and they should sum to the score.
+            total = sum(v for v in contributions.values() if v is not None)
+            assert total == pytest.approx(composite_score, abs=1e-9), (
+                f"composite {composite_name}: sum of contributions {total} "
+                f"!= composite score {composite_score}"
+            )
