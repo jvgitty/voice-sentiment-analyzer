@@ -46,6 +46,15 @@ class TestWindowedAnalyzerTiling:
         tiles = analyzer._tile(audio_duration_sec=60.0)
         assert tiles == [(0.0, 30.0), (30.0, 60.0)]
 
+    def test_window_seconds_is_configurable(self) -> None:
+        """The constructor's window_seconds argument actually drives the
+        tiling — this guards against accidentally hardcoding 30s in _tile."""
+        from vsa.windowed import WindowedAnalyzer
+
+        analyzer = WindowedAnalyzer(window_seconds=15.0)
+        tiles = analyzer._tile(audio_duration_sec=45.0)
+        assert tiles == [(0.0, 15.0), (15.0, 30.0), (30.0, 45.0)]
+
     def test_partial_last_window_is_included_with_full_coverage(self) -> None:
         """Audio not divisible by window_seconds produces a shorter final
         window covering the remainder. Tiles must have no gaps, no
