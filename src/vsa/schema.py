@@ -55,6 +55,36 @@ class AcousticFeatures(BaseModel):
     spectral: SpectralFeatures
 
 
+class DimensionalEmotion(BaseModel):
+    """Continuous arousal / valence / dominance from a regression-head model
+    (e.g. ``audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim``). Each
+    dimension is a probability-like scalar in [0, 1]."""
+
+    model: str
+    arousal: float
+    valence: float
+    dominance: float
+
+
+class CategoricalEmotion(BaseModel):
+    """Discrete emotion label + per-class probability scores from a
+    classifier (e.g. SpeechBrain's IEMOCAP wav2vec2 model). ``scores`` keys
+    are the class names; values sum to ~1.0."""
+
+    model: str
+    label: str
+    scores: dict[str, float]
+
+
+class EmotionResult(BaseModel):
+    """Combined emotion output. Either component may be ``None`` if its
+    underlying model failed independently — the analyzer treats them as
+    independent so one model crashing doesn't wipe out the other."""
+
+    dimensional: Optional[DimensionalEmotion] = None
+    categorical: Optional[CategoricalEmotion] = None
+
+
 class Word(BaseModel):
     w: str
     start: float
@@ -75,7 +105,7 @@ class AnalyzeResult(BaseModel):
     transcription: Optional[Transcript] = None
     acoustic: Optional[AcousticFeatures] = None
     prosody: Optional[Any] = None
-    emotion: Optional[Any] = None
+    emotion: Optional[EmotionResult] = None
     composite: Optional[Any] = None
     windows: Optional[Any] = None
     processing: ProcessingInfo
