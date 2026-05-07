@@ -92,3 +92,21 @@ class TestAcousticAnalyzer:
         # voiced. Force real implementation.
         assert vq.hnr_db > 1.0
         assert vq.voiced_unvoiced_ratio > 0.5
+
+    def test_spectral_mfcc_means_is_13_element_list_of_floats(
+        self, fixture_wav_path: Path
+    ) -> None:
+        """librosa returns 13 MFCCs by default; we mean-pool over time."""
+        from vsa.features.acoustic import AcousticAnalyzer
+
+        analyzer = AcousticAnalyzer()
+        features = analyzer.analyze(fixture_wav_path)
+        mfcc = features.spectral.mfcc_means
+
+        assert isinstance(mfcc, list)
+        assert len(mfcc) == 13
+        for v in mfcc:
+            assert isinstance(v, float)
+        # Default-stub list is all zeros; force a real implementation by
+        # asserting at least one MFCC coefficient is non-zero.
+        assert any(v != 0.0 for v in mfcc)

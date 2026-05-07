@@ -3,6 +3,8 @@ pitch, voice quality, spectral, and loudness features from audio."""
 
 from pathlib import Path
 
+import librosa
+import numpy as np
 import parselmouth
 from parselmouth.praat import call
 
@@ -48,6 +50,12 @@ class AcousticAnalyzer:
         harmonicity = sound.to_harmonicity()
         hnr_db = float(call(harmonicity, "Get mean", 0, 0))
 
+        # Spectral features via librosa. Load audio mono so MFCCs are
+        # deterministic shape (13, n_frames).
+        y, sr = librosa.load(str(audio_path), sr=None, mono=True)
+        mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+        mfcc_means = [float(v) for v in mfcc.mean(axis=1)]
+
         return AcousticFeatures(
             pitch=PitchFeatures(
                 mean_hz=mean_hz,
@@ -68,6 +76,6 @@ class AcousticAnalyzer:
                 centroid_mean=0.0,
                 rolloff_mean=0.0,
                 bandwidth_mean=0.0,
-                mfcc_means=[0.0] * 13,
+                mfcc_means=mfcc_means,
             ),
         )
