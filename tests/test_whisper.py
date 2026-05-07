@@ -165,3 +165,67 @@ class TestMakeTranscriberFactory:
             make_transcriber()
         # Error message names the bad value so the operator can spot it.
         assert "garbage" in str(exc_info.value)
+
+
+class TestPipelineEngineSelection:
+    """When ``Pipeline`` is constructed without an explicit ``transcriber=``,
+    it must consult ``TRANSCRIBER_ENGINE`` via ``make_transcriber()``. This
+    lets the FastAPI handler honour the env var without code changes — the
+    whole point of Slice 9.
+
+    We stub ``make_transcriber`` rather than letting the real Whisper /
+    Parakeet loaders run so the test stays fast and deterministic. The
+    real engine-construction path is covered by TestMakeTranscriberFactory.
+    """
+
+    def test_default_pipeline_calls_make_transcriber(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from vsa import pipeline as pipeline_module
+
+        sentinel = object()
+        called = {"n": 0}
+
+        def fake_make_transcriber():
+            called["n"] += 1
+            return sentinel
+
+        monkeypatch.setattr(
+            pipeline_module, "make_transcriber", fake_make_transcriber
+        )
+
+        pipeline = pipeline_module.Pipeline()
+
+        assert called["n"] == 1
+        assert pipeline._transcriber is sentinel
+
+    def test_whisper_env_var_selects_whisper_transcriber(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """End-to-end env-var dispatch: setting TRANSCRIBER_ENGINE=whisper
+        and constructing a default Pipeline yields a FasterWhisperTranscriber
+        (without paying the model-load cost — construction is lazy)."""
+        from vsa.pipeline import Pipeline
+        from vsa.transcription.whisper import FasterWhisperTranscriber
+
+        monkeypatch.setenv("TRANSCRIBER_ENGINE", "whisper")
+        pipeline = Pipeline()
+
+        assert isinstance(pipeline._transcriber, FasterWhisperTranscriber)
+
+    def test_explicit_transcriber_overrides_env_var(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An injected transcriber wins over the env var so tests / callers
+        with a stub never accidentally trigger a model load."""
+        from vsa.pipeline import Pipeline
+
+        class Sentinel:
+            def transcribe(self, audio_path):  # noqa: D401, ARG002
+                raise NotImplementedError
+
+        sentinel = Sentinel()
+        monkeypatch.setenv("TRANSCRIBER_ENGINE", "whisper")
+        pipeline = Pipeline(transcriber=sentinel)
+
+        assert pipeline._transcriber is sentinel
