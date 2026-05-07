@@ -76,13 +76,13 @@ class TestPipeline:
         assert result.audio.channels == 1
         assert abs(result.audio.duration_seconds - 1.0) < 0.1
 
-        # Slices 2+3+5+4 wire up acoustic, transcription, emotion, and
-        # prosody; remaining sections are still None.
+        # Slices 2+3+4+5+6 wire up acoustic, transcription, prosody,
+        # emotion, and composite; only windows is still None.
         assert result.transcription is not None
         assert result.acoustic is not None
         assert result.emotion is not None
         assert result.prosody is not None
-        assert result.composite is None
+        assert result.composite is not None
         assert result.windows is None
 
         # processing block is populated and errors[] is empty
@@ -321,6 +321,32 @@ class TestPipeline:
         assert result.prosody.pause_total_seconds >= 0.0
         assert result.prosody.pause_mean_seconds >= 0.0
         assert 0.0 <= result.prosody.filler_rate <= 1.0
+
+
+    @pytest.mark.asyncio
+    async def test_analyze_populates_composite_section(
+        self, fixture_wav_path: Path
+    ) -> None:
+        """Pipeline.analyze runs CompositeScorer last and merges its
+        output. With acoustic+prosody+emotion all populated, every
+        composite should score successfully and the section should be a
+        CompositeScores."""
+        from vsa.composites import CompositeScores
+
+        pipeline = Pipeline(
+            transcriber=_StubTranscriber(),
+            emotion_analyzer=_StubEmotionAnalyzer(),
+        )
+        result = await pipeline.analyze(fixture_wav_path)
+
+        assert isinstance(result.composite, CompositeScores)
+        assert result.composite.confidence is not None
+        assert result.composite.engagement is not None
+        assert result.composite.calmness is not None
+        assert 0.0 <= result.composite.confidence <= 1.0
+        assert 0.0 <= result.composite.engagement <= 1.0
+        assert 0.0 <= result.composite.calmness <= 1.0
+        assert result.processing.errors == []
 
 
     @pytest.mark.asyncio
