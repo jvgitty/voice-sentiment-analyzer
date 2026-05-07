@@ -9,11 +9,86 @@ from pathlib import Path
 
 import pytest
 
-from vsa.composites import CompositeScorer
+from vsa.composites import CompositeScorer, ScoreInputs
+from vsa.schema import (
+    AcousticFeatures,
+    DimensionalEmotion,
+    EmotionResult,
+    LoudnessFeatures,
+    PitchFeatures,
+    ProsodyFeatures,
+    SpectralFeatures,
+    VoiceQualityFeatures,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 COMPOSITES_YAML = REPO_ROOT / "composites.yaml"
+
+
+def _make_acoustic(
+    *,
+    jitter: float = 0.005,
+    shimmer: float = 0.02,
+    pitch_std: float = 10.0,
+    pitch_range: float = 200.0,
+    loudness_std: float = 8.0,
+) -> AcousticFeatures:
+    return AcousticFeatures(
+        pitch=PitchFeatures(
+            mean_hz=200.0,
+            median_hz=200.0,
+            std_hz=pitch_std,
+            min_hz=100.0,
+            max_hz=100.0 + pitch_range,
+            range_hz=pitch_range,
+        ),
+        loudness=LoudnessFeatures(
+            mean_db=-20.0, std_db=loudness_std, rms_mean=0.1
+        ),
+        voice_quality=VoiceQualityFeatures(
+            jitter_local=jitter,
+            shimmer_local=shimmer,
+            hnr_db=20.0,
+            voiced_unvoiced_ratio=0.7,
+        ),
+        spectral=SpectralFeatures(
+            centroid_mean=1500.0,
+            rolloff_mean=4000.0,
+            bandwidth_mean=2000.0,
+            mfcc_means=[0.0] * 13,
+        ),
+    )
+
+
+def _make_prosody(
+    *,
+    speaking_rate_wpm: float = 140.0,
+    filler_rate: float = 0.0,
+    pause_total_seconds: float = 0.0,
+) -> ProsodyFeatures:
+    return ProsodyFeatures(
+        speaking_rate_wpm=speaking_rate_wpm,
+        speaking_rate_sps=speaking_rate_wpm / 60.0 * 1.5,
+        pause_count=0,
+        pause_total_seconds=pause_total_seconds,
+        pause_mean_seconds=0.0,
+        filler_rate=filler_rate,
+    )
+
+
+def _make_emotion(
+    *, arousal: float = 0.5, valence: float = 0.5, dominance: float = 0.5
+) -> EmotionResult:
+    return EmotionResult(
+        dimensional=DimensionalEmotion(
+            model="test",
+            arousal=arousal,
+            valence=valence,
+            dominance=dominance,
+        ),
+        categorical=None,
+    )
 
 
 class TestCompositesYamlLoad:
@@ -44,3 +119,54 @@ class TestCompositesYamlInvariants:
             assert total == pytest.approx(1.0, abs=1e-9), (
                 f"composite {name!r} weights sum to {total}, not 1.0"
             )
+
+
+class TestConfidenceFormula:
+    """Hand-computed confidence values against the YAML formula.
+
+    Note on the placeholders: energy_steadiness and pace_steadiness are
+    hardcoded to 1.0 in slice 6 (they need windowed CoV data that arrives
+    in slice 7). Their weights are 0.20 and 0.10 respectively, so the
+    "all minimum" case can never go below 0.20*1.0 + 0.10*1.0 = 0.30.
+    The expected values below take that into account.
+    """
+
+    def test_all_maximum_inputs_score_one(self) -> None:
+        scorer = CompositeScorer.from_yaml(COMPOSITES_YAML)
+        inputs = ScoreInputs(
+            acoustic=_make_acoustic(jitter=0.005, shimmer=0.02),
+            prosody=_make_prosody(filler_rate=0.0),
+            emotion=_make_emotion(dominance=1.0),
+            audio_duration_seconds=10.0,
+        )
+        out = scorer.score(inputs)
+        assert out.confidence == pytest.approx(1.0, abs=1e-9)
+
+    def test_all_minimum_inputs_only_get_placeholder_weight(self) -> None:
+        """jitter at the high end, shimmer high, filler_rate high,
+        dominance=0 — every input-driven subscore is 0. The two slice-7
+        placeholders (energy_steadiness, pace_steadiness) still contribute
+        their hardcoded 1.0 each, so confidence = 0.20 + 0.10 = 0.30."""
+        scorer = CompositeScorer.from_yaml(COMPOSITES_YAML)
+        inputs = ScoreInputs(
+            acoustic=_make_acoustic(jitter=0.025, shimmer=0.10),
+            prosody=_make_prosody(filler_rate=0.08),
+            emotion=_make_emotion(dominance=0.0),
+            audio_duration_seconds=10.0,
+        )
+        out = scorer.score(inputs)
+        assert out.confidence == pytest.approx(0.30, abs=1e-9)
+
+    def test_midpoint_inputs_score_midpoint_plus_placeholders(self) -> None:
+        """Each input-driven subscore at 0.5; placeholders at 1.0.
+        Weighted sum: 0.20*0.5 + 0.15*0.5 + 0.20*1.0 + 0.15*0.5 + 0.10*1.0
+        + 0.20*0.5 = 0.10 + 0.075 + 0.20 + 0.075 + 0.10 + 0.10 = 0.65."""
+        scorer = CompositeScorer.from_yaml(COMPOSITES_YAML)
+        inputs = ScoreInputs(
+            acoustic=_make_acoustic(jitter=0.015, shimmer=0.06),
+            prosody=_make_prosody(filler_rate=0.04),
+            emotion=_make_emotion(dominance=0.5),
+            audio_duration_seconds=10.0,
+        )
+        out = scorer.score(inputs)
+        assert out.confidence == pytest.approx(0.65, abs=1e-9)
