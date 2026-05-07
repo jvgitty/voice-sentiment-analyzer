@@ -164,6 +164,35 @@ class TestPipeline:
 
 
     @pytest.mark.asyncio
+    async def test_transcription_failure_skips_prosody_and_logs_error(
+        self, fixture_wav_path: Path
+    ) -> None:
+        """When transcription returns None, prosody has no input and must be
+        None. A dedicated 'prosody skipped' error is appended so the caller
+        can tell prosody-was-skipped apart from transcription-failed."""
+
+        class BoomTranscriber:
+            def transcribe(self, audio_path: Path) -> Transcript:
+                raise RuntimeError("synthetic transcription failure")
+
+        pipeline = Pipeline(
+            transcriber=BoomTranscriber(),
+            emotion_analyzer=_StubEmotionAnalyzer(),
+        )
+        result = await pipeline.analyze(fixture_wav_path)
+
+        assert result.transcription is None
+        assert result.prosody is None
+        assert any(
+            "prosody" in err.lower() and "transcription" in err.lower()
+            for err in result.processing.errors
+        ), result.processing.errors
+        # Other sections continue running.
+        assert result.acoustic is not None
+        assert result.emotion is not None
+
+
+    @pytest.mark.asyncio
     async def test_acoustic_failure_sets_none_and_logs_error(
         self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
