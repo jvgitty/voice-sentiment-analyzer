@@ -51,7 +51,11 @@ class FasterWhisperTranscriber:
             # ctranslate2 into memory.
             from faster_whisper import WhisperModel
 
-            self._model = WhisperModel(self._model_size)
+            # ``device="cpu"`` keeps deployments portable: the CTranslate2
+            # GPU path requires cuBLAS/cuDNN at runtime, which is not in
+            # the base Docker image. Self-hosters with GPUs can subclass
+            # or pass an env override later.
+            self._model = WhisperModel(self._model_size, device="cpu")
         return self._model
 
     def transcribe(self, audio_path: Path) -> Transcript:
