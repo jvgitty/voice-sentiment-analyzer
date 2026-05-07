@@ -324,6 +324,41 @@ class TestPipeline:
 
 
     @pytest.mark.asyncio
+    async def test_composite_scorer_failure_sets_none_and_logs_error(
+        self,
+        fixture_wav_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Partial-success contract: when CompositeScorer.score raises (e.g.
+        a config bug or a registry mismatch), Pipeline.analyze sets
+        result.composite to None and appends an entry to
+        processing.errors. Other sections still populate."""
+        from vsa.composites import CompositeScorer
+
+        def boom(self: CompositeScorer, inputs) -> None:
+            raise RuntimeError("synthetic composite failure")
+
+        monkeypatch.setattr(CompositeScorer, "score", boom)
+
+        pipeline = Pipeline(
+            transcriber=_StubTranscriber(),
+            emotion_analyzer=_StubEmotionAnalyzer(),
+        )
+        result = await pipeline.analyze(fixture_wav_path)
+
+        assert result.composite is None
+        assert any(
+            "composite" in err.lower() and "synthetic" in err
+            for err in result.processing.errors
+        ), result.processing.errors
+        # Other sections continue running.
+        assert result.acoustic is not None
+        assert result.transcription is not None
+        assert result.emotion is not None
+        assert result.prosody is not None
+
+
+    @pytest.mark.asyncio
     async def test_analyze_populates_composite_section(
         self, fixture_wav_path: Path
     ) -> None:
