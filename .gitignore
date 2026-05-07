@@ -49,3 +49,6 @@ models/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Claude Code local settings (contains user-specific permission grants)
+.claude/
