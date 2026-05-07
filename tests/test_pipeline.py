@@ -5,6 +5,25 @@ from pathlib import Path
 import pytest
 
 from vsa.pipeline import Pipeline
+from vsa.schema import Transcript
+
+
+class _StubTranscriber:
+    """Deterministic transcriber stub used by Pipeline tests so we don't
+    pay the ~12s NeMo model load on every pipeline assertion. The
+    ParakeetTranscriber smoke tests in test_transcription.py cover the
+    real-model path."""
+
+    def __init__(self, transcript: Transcript | None = None) -> None:
+        self._transcript = transcript or Transcript(
+            engine="parakeet-tdt-0.6b-v2",
+            language="en",
+            text="",
+            words=[],
+        )
+
+    def transcribe(self, audio_path: Path) -> Transcript:
+        return self._transcript
 
 
 class TestPipeline:
@@ -12,7 +31,7 @@ class TestPipeline:
     async def test_analyze_fixture_wav_returns_valid_result(
         self, fixture_wav_path: Path
     ) -> None:
-        pipeline = Pipeline()
+        pipeline = Pipeline(transcriber=_StubTranscriber())
         result = await pipeline.analyze(fixture_wav_path)
 
         assert result.schema_version == "1.0"
@@ -20,8 +39,9 @@ class TestPipeline:
         assert result.audio.channels == 1
         assert abs(result.audio.duration_seconds - 1.0) < 0.1
 
-        # Slice 2 wires up acoustic; the remaining feature sections are still None.
-        assert result.transcription is None
+        # Slices 2+3 wire up acoustic and transcription; remaining sections
+        # are still None.
+        assert result.transcription is not None
         assert result.acoustic is not None
         assert result.prosody is None
         assert result.emotion is None
@@ -39,7 +59,7 @@ class TestPipeline:
         self, fixture_wav_path: Path
     ) -> None:
         """Pipeline.analyze runs AcousticAnalyzer and merges its output."""
-        pipeline = Pipeline()
+        pipeline = Pipeline(transcriber=_StubTranscriber())
         result = await pipeline.analyze(fixture_wav_path)
 
         assert result.acoustic is not None
@@ -47,6 +67,30 @@ class TestPipeline:
         # Sanity: the wired-in AcousticFeatures should reflect the 440 Hz
         # fixture, not stub zeros.
         assert 380.0 <= result.acoustic.pitch.mean_hz <= 500.0
+
+
+    @pytest.mark.asyncio
+    async def test_analyze_populates_transcription_section(
+        self, fixture_wav_path: Path
+    ) -> None:
+        """Pipeline.analyze runs the injected Transcriber and merges its
+        output into result.transcription."""
+        stub = _StubTranscriber(
+            Transcript(
+                engine="parakeet-tdt-0.6b-v2",
+                language="en",
+                text="hello world",
+                words=[],
+            )
+        )
+        pipeline = Pipeline(transcriber=stub)
+        result = await pipeline.analyze(fixture_wav_path)
+
+        assert result.transcription is not None
+        assert result.transcription.engine == "parakeet-tdt-0.6b-v2"
+        assert result.transcription.language == "en"
+        assert result.transcription.text == "hello world"
+        assert result.processing.errors == []
 
 
     @pytest.mark.asyncio
@@ -63,7 +107,7 @@ class TestPipeline:
 
         monkeypatch.setattr(AcousticAnalyzer, "analyze", boom)
 
-        pipeline = Pipeline()
+        pipeline = Pipeline(transcriber=_StubTranscriber())
         result = await pipeline.analyze(fixture_wav_path)
 
         assert result.acoustic is None
