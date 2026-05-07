@@ -217,3 +217,44 @@ class TestEngagementFormula:
         )
         out = scorer.score(inputs)
         assert out.engagement == pytest.approx(0.5, abs=1e-9)
+
+
+class TestCalmnessFormula:
+    """Hand-computed calmness values. No slice-7 placeholders here.
+
+    All-max means: low pitch_std, low jitter, low arousal, high valence,
+    low/unhurried wpm. The labels carry the inversions.
+    """
+
+    def test_all_maximum_inputs_score_one(self) -> None:
+        scorer = CompositeScorer.from_yaml(COMPOSITES_YAML)
+        inputs = ScoreInputs(
+            acoustic=_make_acoustic(jitter=0.005, pitch_std=10.0),
+            prosody=_make_prosody(speaking_rate_wpm=120.0),
+            emotion=_make_emotion(arousal=0.0, valence=1.0),
+            audio_duration_seconds=10.0,
+        )
+        out = scorer.score(inputs)
+        assert out.calmness == pytest.approx(1.0, abs=1e-9)
+
+    def test_all_minimum_inputs_score_zero(self) -> None:
+        scorer = CompositeScorer.from_yaml(COMPOSITES_YAML)
+        inputs = ScoreInputs(
+            acoustic=_make_acoustic(jitter=0.025, pitch_std=50.0),
+            prosody=_make_prosody(speaking_rate_wpm=200.0),
+            emotion=_make_emotion(arousal=1.0, valence=0.0),
+            audio_duration_seconds=10.0,
+        )
+        out = scorer.score(inputs)
+        assert out.calmness == pytest.approx(0.0, abs=1e-9)
+
+    def test_midpoint_inputs_score_midpoint(self) -> None:
+        scorer = CompositeScorer.from_yaml(COMPOSITES_YAML)
+        inputs = ScoreInputs(
+            acoustic=_make_acoustic(jitter=0.015, pitch_std=30.0),
+            prosody=_make_prosody(speaking_rate_wpm=160.0),
+            emotion=_make_emotion(arousal=0.5, valence=0.5),
+            audio_duration_seconds=10.0,
+        )
+        out = scorer.score(inputs)
+        assert out.calmness == pytest.approx(0.5, abs=1e-9)
