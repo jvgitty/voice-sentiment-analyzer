@@ -72,3 +72,35 @@ class TestWindowedAnalyzerTiling:
             assert curr[0] == prev[1], (
                 f"gap or overlap between {prev} and {curr}"
             )
+
+
+class TestWindowedAnalyzerEndToEnd:
+    def test_analyze_returns_single_window_with_pitch_for_short_fixture(
+        self, fixture_wav_path: Path
+    ) -> None:
+        """End-to-end smoke: WindowedAnalyzer.analyze on the 1s 440 Hz
+        sine fixture returns exactly one WindowMetrics covering the full
+        audio. With the real AcousticAnalyzer the window's pitch_mean_hz
+        should reflect the 440 Hz tone (broad tolerance). EmotionAnalyzer
+        is stubbed to None so we don't pay the wav2vec2 load cost in this
+        wiring test — the dimensional fields are allowed to be None."""
+        from vsa.composites import CompositeScorer
+        from vsa.features.acoustic import AcousticAnalyzer
+        from vsa.pipeline import _COMPOSITES_YAML_PATH
+        from vsa.windowed import WindowedAnalyzer
+
+        analyzer = WindowedAnalyzer(window_seconds=30.0)
+        scorer = CompositeScorer.from_yaml(_COMPOSITES_YAML_PATH)
+        windows = analyzer.analyze(
+            audio_path=fixture_wav_path,
+            transcript=None,
+            composite_scorer=scorer,
+            emotion_analyzer=None,  # skip dimensional inference
+            acoustic_analyzer=AcousticAnalyzer(),
+        )
+        assert len(windows) == 1
+        window = windows[0]
+        assert window.start_sec == 0.0
+        assert abs(window.end_sec - 1.0) < 0.05
+        assert window.pitch_mean_hz is not None
+        assert 380.0 <= window.pitch_mean_hz <= 500.0
