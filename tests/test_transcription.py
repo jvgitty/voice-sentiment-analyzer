@@ -6,6 +6,18 @@ from typing import Protocol, runtime_checkable
 import pytest
 
 
+@pytest.fixture(scope="session")
+def parakeet_transcriber():
+    """Session-scoped Parakeet transcriber. Loading the ~2GB model takes
+    several seconds, so we share one instance across smoke tests."""
+    from vsa.transcription.parakeet import ParakeetTranscriber
+
+    transcriber = ParakeetTranscriber()
+    # Force the lazy load once so subsequent test calls are warm.
+    transcriber._load()
+    return transcriber
+
+
 class TestTranscriberInterface:
     def test_word_model_has_required_fields(self) -> None:
         from vsa.schema import Word
@@ -69,3 +81,31 @@ class TestParakeetTranscriberConstruction:
 
         transcriber = ParakeetTranscriber()
         assert transcriber.engine == "parakeet-tdt-0.6b-v2"
+
+
+class TestParakeetTranscriberSmoke:
+    """Smoke tests that exercise the real NeMo model. The fixture audio is
+    a 1s 440 Hz sine — the model will produce a garbage / empty transcript,
+    so we assert only on output shape, never on content."""
+
+    def test_transcribe_returns_transcript_with_correct_engine_and_language(
+        self, parakeet_transcriber, fixture_wav_path: Path
+    ) -> None:
+        result = parakeet_transcriber.transcribe(fixture_wav_path)
+
+        assert result.engine == "parakeet-tdt-0.6b-v2"
+        assert result.language == "en"
+
+    def test_transcribe_returns_string_text_and_word_list(
+        self, parakeet_transcriber, fixture_wav_path: Path
+    ) -> None:
+        result = parakeet_transcriber.transcribe(fixture_wav_path)
+
+        assert isinstance(result.text, str)
+        assert isinstance(result.words, list)
+        # Every word entry, if any, conforms to the Word schema.
+        for word in result.words:
+            assert isinstance(word.w, str)
+            assert isinstance(word.start, float)
+            assert isinstance(word.end, float)
+            assert isinstance(word.conf, float)
