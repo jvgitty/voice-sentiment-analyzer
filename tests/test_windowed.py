@@ -74,6 +74,154 @@ class TestWindowedAnalyzerTiling:
             )
 
 
+class TestEnergySteadinessOverride:
+    def test_score_overrides_replace_registry_value_for_energy_steadiness(
+        self,
+    ) -> None:
+        """CompositeScorer.score(overrides={...}) replaces the registry's
+        placeholder with the supplied value. Confidence with override=0.0
+        must differ from confidence with override=1.0 (the placeholder)
+        because energy_steadiness has 0.20 weight in the YAML."""
+        from vsa.composites import CompositeScorer, ScoreInputs
+        from vsa.pipeline import _COMPOSITES_YAML_PATH
+        from vsa.schema import (
+            AcousticFeatures,
+            DimensionalEmotion,
+            EmotionResult,
+            LoudnessFeatures,
+            PitchFeatures,
+            ProsodyFeatures,
+            SpectralFeatures,
+            VoiceQualityFeatures,
+        )
+
+        acoustic = AcousticFeatures(
+            pitch=PitchFeatures(
+                mean_hz=200.0,
+                median_hz=200.0,
+                std_hz=10.0,
+                min_hz=100.0,
+                max_hz=300.0,
+                range_hz=200.0,
+            ),
+            loudness=LoudnessFeatures(
+                mean_db=-20.0, std_db=4.0, rms_mean=0.1
+            ),
+            voice_quality=VoiceQualityFeatures(
+                jitter_local=0.005,
+                shimmer_local=0.02,
+                hnr_db=20.0,
+                voiced_unvoiced_ratio=0.7,
+            ),
+            spectral=SpectralFeatures(
+                centroid_mean=1500.0,
+                rolloff_mean=4000.0,
+                bandwidth_mean=2000.0,
+                mfcc_means=[0.0] * 13,
+            ),
+        )
+        prosody = ProsodyFeatures(
+            speaking_rate_wpm=140.0,
+            speaking_rate_sps=4.0,
+            pause_count=0,
+            pause_total_seconds=0.0,
+            pause_mean_seconds=0.0,
+            filler_rate=0.0,
+        )
+        emotion = EmotionResult(
+            dimensional=DimensionalEmotion(
+                model="m", arousal=0.5, valence=0.5, dominance=0.5
+            )
+        )
+        inputs = ScoreInputs(
+            acoustic=acoustic,
+            prosody=prosody,
+            emotion=emotion,
+            audio_duration_seconds=60.0,
+        )
+
+        scorer = CompositeScorer.from_yaml(_COMPOSITES_YAML_PATH)
+        baseline = scorer.score(inputs)
+        overridden = scorer.score(
+            inputs, overrides={"energy_steadiness": 0.0}
+        )
+        assert baseline.confidence is not None
+        assert overridden.confidence is not None
+        # energy_steadiness has 0.20 weight; baseline uses placeholder=1.0,
+        # override forces 0.0, so confidence drops by ~0.20.
+        assert overridden.confidence < baseline.confidence
+        assert (baseline.confidence - overridden.confidence) == pytest.approx(
+            0.20, abs=1e-6
+        )
+
+
+class TestPipelineEnergySteadinessFromWindows:
+    @pytest.mark.asyncio
+    async def test_pipeline_injects_energy_steadiness_from_window_loudness_cov(
+        self, fixture_wav_path: Path
+    ) -> None:
+        """End-to-end: a stubbed WindowedAnalyzer that returns windows with
+        varying loudness causes whole-audio confidence to differ from the
+        all-1.0-placeholder baseline produced by a single-window stub.
+
+        This pins the contract that Pipeline.analyze derives the
+        energy_steadiness override from the windows pass and threads it
+        through CompositeScorer.score."""
+        from vsa.pipeline import Pipeline
+        from vsa.schema import WindowMetrics
+        from tests.test_pipeline import _StubEmotionAnalyzer, _StubTranscriber
+
+        class _StubWindowedSingle:
+            """Single window — CoV undefined for n<2 → no override → the
+            YAML's placeholder (1.0) controls confidence."""
+
+            def analyze(self, **kwargs):
+                return [
+                    WindowMetrics(
+                        start_sec=0.0, end_sec=1.0, loudness_mean_db=-20.0
+                    )
+                ]
+
+        class _StubWindowedVarying:
+            """Windows with strongly varying loudness — high CoV → low
+            energy_steadiness → confidence drops below the baseline."""
+
+            def analyze(self, **kwargs):
+                return [
+                    WindowMetrics(
+                        start_sec=0.0, end_sec=0.5, loudness_mean_db=-10.0
+                    ),
+                    WindowMetrics(
+                        start_sec=0.5, end_sec=1.0, loudness_mean_db=-50.0
+                    ),
+                ]
+
+        baseline_pipeline = Pipeline(
+            transcriber=_StubTranscriber(),
+            emotion_analyzer=_StubEmotionAnalyzer(),
+            windowed_analyzer=_StubWindowedSingle(),
+        )
+        baseline_result = await baseline_pipeline.analyze(fixture_wav_path)
+
+        varying_pipeline = Pipeline(
+            transcriber=_StubTranscriber(),
+            emotion_analyzer=_StubEmotionAnalyzer(),
+            windowed_analyzer=_StubWindowedVarying(),
+        )
+        varying_result = await varying_pipeline.analyze(fixture_wav_path)
+
+        assert baseline_result.composite is not None
+        assert varying_result.composite is not None
+        assert baseline_result.composite.confidence is not None
+        assert varying_result.composite.confidence is not None
+        # Varying loudness across windows → CoV>0 → energy_steadiness<1
+        # → confidence strictly below the placeholder baseline.
+        assert (
+            varying_result.composite.confidence
+            < baseline_result.composite.confidence
+        )
+
+
 class TestWindowedAnalyzerEndToEnd:
     def test_analyze_returns_single_window_with_pitch_for_short_fixture(
         self, fixture_wav_path: Path
