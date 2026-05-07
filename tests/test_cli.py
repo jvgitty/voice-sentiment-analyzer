@@ -52,3 +52,11 @@ class TestCliAnalyze:
             or "not found" in combined.lower()
             or "exist" in combined.lower()
         )
+
+    def test_analyze_help_lists_all_flags(self) -> None:
+        result = runner.invoke(app, ["analyze", "--help"])
+
+        assert result.exit_code == 0, result.output
+        assert "--out" in result.output
+        assert "--engine" in result.output
+        assert "--window-seconds" in result.output

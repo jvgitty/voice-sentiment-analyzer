@@ -5,12 +5,18 @@ local audio file from the command line.
 """
 
 import asyncio
+from enum import Enum
 from pathlib import Path
 from typing import Optional
 
 import typer
 
 from vsa.pipeline import Pipeline
+
+
+class Engine(str, Enum):
+    parakeet = "parakeet"
+    whisper = "whisper"
 
 
 app = typer.Typer(help="Voice Sentiment Analyzer CLI.", no_args_is_help=True)
@@ -29,8 +35,32 @@ def analyze(
         "--out",
         help="Path to write the result JSON. If omitted, JSON is printed to stdout.",
     ),
+    engine: Optional[Engine] = typer.Option(
+        None,
+        "--engine",
+        help=(
+            "Transcription engine override (parakeet|whisper). Stub for now: "
+            "the env var this maps to (TRANSCRIBER_ENGINE) is wired in a "
+            "later slice; the value is currently accepted but not used."
+        ),
+    ),
+    window_seconds: Optional[int] = typer.Option(
+        None,
+        "--window-seconds",
+        help=(
+            "Override window size for the time-series view. Stub for now: "
+            "the env var this maps to (WINDOW_SECONDS) is wired in a "
+            "later slice; the value is currently accepted but not used."
+        ),
+    ),
 ) -> None:
     """Analyze a local audio file and emit the result JSON."""
+    # NOTE: --engine and --window-seconds are accepted but currently
+    # only "passed through" -- the env vars they map to (TRANSCRIBER_ENGINE,
+    # WINDOW_SECONDS) are introduced in later slices (Slice 7 and Slice 9).
+    _ = engine
+    _ = window_seconds
+
     if not audio_path.exists():
         typer.echo(f"error: audio file not found: {audio_path}", err=True)
         raise typer.Exit(code=1)
