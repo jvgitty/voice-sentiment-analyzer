@@ -155,6 +155,35 @@ class TestEnergySteadinessOverride:
         )
 
 
+class TestWindowSecondsEnvVar:
+    @pytest.mark.asyncio
+    async def test_pipeline_constructs_windowed_analyzer_from_env_var(
+        self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Setting WINDOW_SECONDS in the env causes Pipeline construction
+        to use that value for the WindowedAnalyzer. We verify by setting
+        it to a sub-fixture-duration value (0.4s) so the 1s fixture tiles
+        into multiple windows; with the default 30s it would be one."""
+        from tests.test_pipeline import (
+            _StubEmotionAnalyzer,
+            _StubTranscriber,
+        )
+        from vsa.pipeline import Pipeline
+
+        monkeypatch.setenv("WINDOW_SECONDS", "0.4")
+        pipeline = Pipeline(
+            transcriber=_StubTranscriber(),
+            emotion_analyzer=_StubEmotionAnalyzer(),
+        )
+        result = await pipeline.analyze(fixture_wav_path)
+        assert result.windows is not None
+        # 1.0s / 0.4s -> tiles at [0.0, 0.4), [0.4, 0.8), [0.8, 1.0).
+        assert len(result.windows) == 3
+        assert result.windows[0].start_sec == 0.0
+        assert result.windows[0].end_sec == pytest.approx(0.4)
+        assert result.windows[-1].end_sec == pytest.approx(1.0)
+
+
 class TestPipelineEnergySteadinessFromWindows:
     @pytest.mark.asyncio
     async def test_pipeline_injects_energy_steadiness_from_window_loudness_cov(
