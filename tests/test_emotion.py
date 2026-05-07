@@ -69,3 +69,27 @@ class TestEmotionSchemaModels:
         empty = EmotionResult(dimensional=None, categorical=None)
         assert empty.dimensional is None
         assert empty.categorical is None
+
+
+# ---------------------------------------------------------------------------
+# Cycle 2: EmotionAnalyzer construction is lazy — no model load.
+# ---------------------------------------------------------------------------
+
+
+class TestEmotionAnalyzerConstruction:
+    def test_class_importable(self) -> None:
+        from vsa.features.emotion import EmotionAnalyzer
+
+        assert EmotionAnalyzer is not None
+
+    def test_constructor_does_not_load_models(self) -> None:
+        """Lazy-load contract: instantiating EmotionAnalyzer must not pull
+        either underlying model into memory. Both wav2vec2 backbones are
+        ~1GB each, so we defer loading to the first .analyze() call."""
+        from vsa.features.emotion import EmotionAnalyzer
+
+        analyzer = EmotionAnalyzer()
+        # Internal model handles must be unset until analyze() is called.
+        assert analyzer._dimensional_model is None
+        assert analyzer._dimensional_processor is None
+        assert analyzer._categorical_classifier is None
