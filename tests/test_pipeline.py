@@ -391,6 +391,40 @@ class TestPipeline:
 
 
     @pytest.mark.asyncio
+    async def test_windowed_failure_sets_windows_none_and_logs_error(
+        self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Partial-success contract: when WindowedAnalyzer.analyze raises,
+        result.windows is None, an entry is appended to processing.errors,
+        and every other section (acoustic / transcription / emotion /
+        prosody / composite) still populates."""
+        from vsa.windowed import WindowedAnalyzer
+
+        def boom(self, **kwargs) -> None:
+            raise RuntimeError("synthetic windowed failure")
+
+        monkeypatch.setattr(WindowedAnalyzer, "analyze", boom)
+
+        pipeline = Pipeline(
+            transcriber=_StubTranscriber(),
+            emotion_analyzer=_StubEmotionAnalyzer(),
+        )
+        result = await pipeline.analyze(fixture_wav_path)
+
+        assert result.windows is None
+        assert any(
+            "window" in err.lower() and "synthetic" in err
+            for err in result.processing.errors
+        ), result.processing.errors
+        # Other sections continue running.
+        assert result.acoustic is not None
+        assert result.transcription is not None
+        assert result.emotion is not None
+        assert result.prosody is not None
+        assert result.composite is not None
+
+
+    @pytest.mark.asyncio
     async def test_emotion_failure_sets_none_and_logs_error(
         self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
