@@ -21,7 +21,8 @@
       "Bash(py -m venv .venv)",
       "Bash(.venv/Scripts/python.exe -m pip install --upgrade pip)",
       "Bash(.venv/Scripts/python.exe -m pip install -e \".[dev]\")",
-      "Bash(.venv/Scripts/python.exe -m pytest tests/test_auth.py -x)"
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_auth.py -x)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_auth.py::TestAuthVerifier::test_rejects_wrong_token -x)"
     ]
   }
 }
