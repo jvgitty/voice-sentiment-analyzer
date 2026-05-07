@@ -20,9 +20,9 @@ class TestPipeline:
         assert result.audio.channels == 1
         assert abs(result.audio.duration_seconds - 1.0) < 0.1
 
-        # Slice 1: all feature sections are None
+        # Slice 2 wires up acoustic; the remaining feature sections are still None.
         assert result.transcription is None
-        assert result.acoustic is None
+        assert result.acoustic is not None
         assert result.prosody is None
         assert result.emotion is None
         assert result.composite is None
