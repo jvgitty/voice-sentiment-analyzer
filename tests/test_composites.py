@@ -329,3 +329,45 @@ class TestFormulasEcho:
                 f"formulas mismatch for {composite_name}: "
                 f"yaml={expected_sources!r} echo={out.formulas[composite_name]!r}"
             )
+
+
+class TestOutputRangeInvariant:
+    """For ANY combination of plausible feature inputs, every composite
+    output must lie in [0, 1]. Mini property test (50 randomized cases).
+    Inputs go beyond the YAML's normalize() bounds intentionally so the
+    clipping path is exercised."""
+
+    def test_outputs_always_in_zero_one(self) -> None:
+        import random
+
+        rng = random.Random(20260507)  # deterministic seed
+
+        scorer = CompositeScorer.from_yaml(COMPOSITES_YAML)
+        for _ in range(50):
+            inputs = ScoreInputs(
+                acoustic=_make_acoustic(
+                    jitter=rng.uniform(0.0, 0.1),
+                    shimmer=rng.uniform(0.0, 0.5),
+                    pitch_std=rng.uniform(0.0, 200.0),
+                    pitch_range=rng.uniform(0.0, 500.0),
+                    loudness_std=rng.uniform(0.0, 30.0),
+                ),
+                prosody=_make_prosody(
+                    speaking_rate_wpm=rng.uniform(0.0, 400.0),
+                    filler_rate=rng.uniform(0.0, 1.0),
+                    pause_total_seconds=rng.uniform(0.0, 9.0),
+                ),
+                emotion=_make_emotion(
+                    arousal=rng.uniform(0.0, 1.0),
+                    valence=rng.uniform(0.0, 1.0),
+                    dominance=rng.uniform(0.0, 1.0),
+                ),
+                audio_duration_seconds=10.0,
+            )
+            out = scorer.score(inputs)
+            for name in ("confidence", "engagement", "calmness"):
+                v = getattr(out, name)
+                assert v is not None
+                assert 0.0 <= v <= 1.0, (
+                    f"{name}={v} for inputs={inputs!r}"
+                )
