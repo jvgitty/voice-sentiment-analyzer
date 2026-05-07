@@ -15,3 +15,7 @@ class TestAuthVerifier:
         verifier = AuthVerifier(api_key="right")
         with pytest.raises(AuthError):
             verifier.verify("Bearer wrong")
+
+    def test_accepts_correct_token(self) -> None:
+        verifier = AuthVerifier(api_key="right")
+        assert verifier.verify("Bearer right") is None
