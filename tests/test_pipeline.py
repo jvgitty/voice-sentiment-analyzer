@@ -94,6 +94,30 @@ class TestPipeline:
 
 
     @pytest.mark.asyncio
+    async def test_transcription_failure_sets_none_and_logs_error(
+        self, fixture_wav_path: Path
+    ) -> None:
+        """Partial-success contract: a flaky Transcriber must not 500 the
+        whole pipeline. transcription becomes None, an entry is appended to
+        processing.errors, and other sections (acoustic) still populate."""
+
+        class BoomTranscriber:
+            def transcribe(self, audio_path: Path) -> Transcript:
+                raise RuntimeError("synthetic transcription failure")
+
+        pipeline = Pipeline(transcriber=BoomTranscriber())
+        result = await pipeline.analyze(fixture_wav_path)
+
+        assert result.transcription is None
+        assert any(
+            "transcription" in err.lower() and "synthetic" in err
+            for err in result.processing.errors
+        ), result.processing.errors
+        # Other sections continue running.
+        assert result.acoustic is not None
+
+
+    @pytest.mark.asyncio
     async def test_acoustic_failure_sets_none_and_logs_error(
         self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
