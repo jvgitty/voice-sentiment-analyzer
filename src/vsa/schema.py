@@ -19,11 +19,47 @@ class ProcessingInfo(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
+class PitchFeatures(BaseModel):
+    mean_hz: float
+    median_hz: float
+    std_hz: float
+    min_hz: float
+    max_hz: float
+    range_hz: float
+
+
+class LoudnessFeatures(BaseModel):
+    mean_db: float
+    std_db: float
+    rms_mean: float
+
+
+class VoiceQualityFeatures(BaseModel):
+    jitter_local: float
+    shimmer_local: float
+    hnr_db: float
+    voiced_unvoiced_ratio: float
+
+
+class SpectralFeatures(BaseModel):
+    centroid_mean: float
+    rolloff_mean: float
+    bandwidth_mean: float
+    mfcc_means: list[float]
+
+
+class AcousticFeatures(BaseModel):
+    pitch: PitchFeatures
+    loudness: LoudnessFeatures
+    voice_quality: VoiceQualityFeatures
+    spectral: SpectralFeatures
+
+
 class AnalyzeResult(BaseModel):
     schema_version: str = "1.0"
     audio: AudioInfo
     transcription: Optional[Any] = None
-    acoustic: Optional[Any] = None
+    acoustic: Optional[AcousticFeatures] = None
     prosody: Optional[Any] = None
     emotion: Optional[Any] = None
     composite: Optional[Any] = None
