@@ -24,3 +24,15 @@ class TestWindowMetricsSchema:
         assert wm.confidence is None
         assert wm.engagement is None
         assert wm.calmness is None
+
+
+class TestWindowedAnalyzerTiling:
+    def test_audio_shorter_than_window_yields_single_window(self) -> None:
+        """For audio shorter than the window size, _tile must produce a
+        single window covering the whole audio, not zero windows or one
+        with end_sec past the audio duration."""
+        from vsa.windowed import WindowedAnalyzer
+
+        analyzer = WindowedAnalyzer(window_seconds=30.0)
+        tiles = analyzer._tile(audio_duration_sec=10.0)
+        assert tiles == [(0.0, 10.0)]
