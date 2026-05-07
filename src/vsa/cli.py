@@ -6,6 +6,7 @@ local audio file from the command line.
 
 import asyncio
 from pathlib import Path
+from typing import Optional
 
 import typer
 
@@ -21,8 +22,20 @@ def _main() -> None:
 
 
 @app.command()
-def analyze(audio_path: Path) -> None:
-    """Analyze a local audio file and print the result JSON to stdout."""
+def analyze(
+    audio_path: Path,
+    out: Optional[Path] = typer.Option(
+        None,
+        "--out",
+        help="Path to write the result JSON. If omitted, JSON is printed to stdout.",
+    ),
+) -> None:
+    """Analyze a local audio file and emit the result JSON."""
     pipeline = Pipeline()
     result = asyncio.run(pipeline.analyze(audio_path))
-    typer.echo(result.model_dump_json())
+    payload = result.model_dump_json()
+
+    if out is not None:
+        out.write_text(payload)
+    else:
+        typer.echo(payload)
