@@ -33,5 +33,10 @@ class AudioFetcher:
                         raise ContentTooLargeError(
                             f"content-length {length} exceeds max_bytes {self._max_bytes}"
                         )
+                content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+                if content_type not in self._allowed_types:
+                    raise InvalidContentTypeError(
+                        f"content-type {content_type!r} not in allowed set"
+                    )
                 # Body fetch will be implemented as later tests demand it.
                 raise NotImplementedError("body fetch not yet implemented")

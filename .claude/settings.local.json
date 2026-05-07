@@ -24,7 +24,8 @@
       "Bash(.venv/Scripts/python.exe -m pytest tests/test_auth.py -x)",
       "Bash(.venv/Scripts/python.exe -m pytest tests/test_auth.py::TestAuthVerifier::test_rejects_wrong_token -x)",
       "Bash(.venv/Scripts/python.exe -m pytest tests/test_auth.py::TestCallbackSigner -x)",
-      "Bash(.venv/Scripts/python.exe -m pytest tests/test_audio_fetcher.py -x)"
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_audio_fetcher.py -x)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_audio_fetcher.py::TestAudioFetcher::test_rejects_wrong_content_type -x)"
     ]
   }
 }

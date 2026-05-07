@@ -7,6 +7,7 @@ import respx
 from vsa.audio import (
     AudioFetcher,
     ContentTooLargeError,
+    InvalidContentTypeError,
 )
 
 
@@ -39,3 +40,18 @@ class TestAudioFetcher:
             # did not consume the response content. The cleanest assertion: the response body bytes
             # were never read into memory by the fetcher (we verify by ensuring the rejected error
             # carries the declared length, not actual transferred bytes).
+
+    @pytest.mark.asyncio
+    async def test_rejects_wrong_content_type(self) -> None:
+        url = "https://example.test/file.txt"
+        with respx.mock(assert_all_called=True) as respx_mock:
+            respx_mock.get(url).mock(
+                return_value=httpx.Response(
+                    200,
+                    headers={"Content-Type": "text/plain", "Content-Length": "10"},
+                    content=b"plain text",
+                )
+            )
+            fetcher = AudioFetcher(max_bytes=1_000_000, allowed_types=ALLOWED)
+            with pytest.raises(InvalidContentTypeError):
+                await fetcher.fetch(url)
