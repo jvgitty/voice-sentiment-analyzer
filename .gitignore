@@ -38,6 +38,7 @@ Thumbs.db
 
 # ML models (baked into Docker image, not committed)
 models/
+wav2vec2_checkpoints/
 *.bin
 *.safetensors
 *.onnx
