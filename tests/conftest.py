@@ -3,6 +3,13 @@
 from pathlib import Path
 import wave
 
+# Pre-import the heavyweight ML stack (pandas/pyarrow via NeMo) BEFORE
+# librosa / audioread are loaded by other test modules. On Windows + Python
+# 3.13, loading pyarrow after librosa has been imported triggers a fatal
+# access violation during DLL initialisation. Importing pandas first warms
+# up pyarrow against a clean process state and sidesteps the collision.
+import pandas  # noqa: F401  -- imported for side effects (pyarrow init).
+
 import numpy as np
 import pytest
 
