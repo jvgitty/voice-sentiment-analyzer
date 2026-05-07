@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.eggs/
+*.egg-info/
+*.egg
+build/
+dist/
+
+# Environment
+.env
+.env.local
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Audio (do not commit voice notes)
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.ogg
+*.opus
+
+# ML models (baked into Docker image, not committed)
+models/
+*.bin
+*.safetensors
+*.onnx
+*.pt
+*.ckpt
+
+# Logs and temp
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
