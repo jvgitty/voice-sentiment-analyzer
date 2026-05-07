@@ -36,3 +36,12 @@ class TestWindowedAnalyzerTiling:
         analyzer = WindowedAnalyzer(window_seconds=30.0)
         tiles = analyzer._tile(audio_duration_sec=10.0)
         assert tiles == [(0.0, 10.0)]
+
+    def test_even_multiple_yields_back_to_back_full_windows(self) -> None:
+        """When duration is an exact multiple of window_seconds, _tile
+        produces back-to-back full-length windows with no partial tail."""
+        from vsa.windowed import WindowedAnalyzer
+
+        analyzer = WindowedAnalyzer(window_seconds=30.0)
+        tiles = analyzer._tile(audio_duration_sec=60.0)
+        assert tiles == [(0.0, 30.0), (30.0, 60.0)]

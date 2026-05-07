@@ -33,4 +33,10 @@ class WindowedAnalyzer:
         # zero-length tail when duration <= window.
         if audio_duration_sec <= self._window_seconds:
             return [(0.0, float(audio_duration_sec))]
-        return []
+        # Full-length back-to-back windows for the bulk of the audio.
+        tiles: list[tuple[float, float]] = []
+        start = 0.0
+        while start + self._window_seconds <= audio_duration_sec:
+            tiles.append((start, start + self._window_seconds))
+            start += self._window_seconds
+        return tiles
