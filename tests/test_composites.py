@@ -170,3 +170,50 @@ class TestConfidenceFormula:
         )
         out = scorer.score(inputs)
         assert out.confidence == pytest.approx(0.65, abs=1e-9)
+
+
+class TestEngagementFormula:
+    """Hand-computed engagement values. No slice-7 placeholders here, so
+    the all-min case truly hits 0.0 and all-max truly hits 1.0."""
+
+    def test_all_maximum_inputs_score_one(self) -> None:
+        scorer = CompositeScorer.from_yaml(COMPOSITES_YAML)
+        inputs = ScoreInputs(
+            acoustic=_make_acoustic(pitch_range=200.0, loudness_std=8.0),
+            prosody=_make_prosody(
+                speaking_rate_wpm=180.0, pause_total_seconds=0.0
+            ),
+            emotion=_make_emotion(arousal=1.0),
+            audio_duration_seconds=10.0,
+        )
+        out = scorer.score(inputs)
+        assert out.engagement == pytest.approx(1.0, abs=1e-9)
+
+    def test_all_minimum_inputs_score_zero(self) -> None:
+        scorer = CompositeScorer.from_yaml(COMPOSITES_YAML)
+        inputs = ScoreInputs(
+            acoustic=_make_acoustic(pitch_range=50.0, loudness_std=1.0),
+            prosody=_make_prosody(
+                speaking_rate_wpm=100.0, pause_total_seconds=4.0
+            ),
+            emotion=_make_emotion(arousal=0.0),
+            audio_duration_seconds=10.0,  # 4s/10s = 0.4 ratio = clipped max
+        )
+        out = scorer.score(inputs)
+        assert out.engagement == pytest.approx(0.0, abs=1e-9)
+
+    def test_midpoint_inputs_score_midpoint(self) -> None:
+        """range=125 (mid 50..200), loud_std=4.5 (mid 1..8), arousal=0.5,
+        wpm=140 (mid 100..180), pause_ratio=0.2 (mid 0..0.4) -> all
+        subscores 0.5 -> engagement 0.5."""
+        scorer = CompositeScorer.from_yaml(COMPOSITES_YAML)
+        inputs = ScoreInputs(
+            acoustic=_make_acoustic(pitch_range=125.0, loudness_std=4.5),
+            prosody=_make_prosody(
+                speaking_rate_wpm=140.0, pause_total_seconds=2.0
+            ),
+            emotion=_make_emotion(arousal=0.5),
+            audio_duration_seconds=10.0,
+        )
+        out = scorer.score(inputs)
+        assert out.engagement == pytest.approx(0.5, abs=1e-9)
