@@ -37,3 +37,15 @@ class CompositeScorer:
         with open(path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
         return cls(config)
+
+    def weights_per_composite(self) -> dict[str, dict[str, float]]:
+        """Return ``{composite_name: {component_name: weight}}`` straight
+        from the YAML so tests can assert the weight-sum invariant without
+        hardcoding component names."""
+        out: dict[str, dict[str, float]] = {}
+        for composite_name, body in self._config.items():
+            comps = body.get("components", [])
+            out[composite_name] = {
+                comp["name"]: float(comp["weight"]) for comp in comps
+            }
+        return out
