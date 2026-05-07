@@ -8,7 +8,18 @@ to import (and run) on every request without any cold-start cost.
 
 from __future__ import annotations
 
+import re
+
 from vsa.schema import ProsodyFeatures, Transcript
+
+# Vowel-cluster syllable estimator. Each maximal run of vowels (including
+# 'y') is one syllable; a word with zero vowel clusters (e.g. punctuation
+# leaking through) gets a floor of 1 so word_count is never above
+# syllable_count and rate values stay sensible. This is intentionally
+# crude — pyphen / nltk would be more accurate but adds heavy deps for a
+# v1 metric whose downstream consumers (composite scoring) only care
+# about the rough magnitude.
+_VOWEL_RUN = re.compile(r"[aeiouy]+")
 
 # Fixed filler-word lookup, mixed unigrams and bigrams. Matched
 # case-insensitively per spec. Multi-word entries are detected via a
@@ -47,20 +58,29 @@ class ProsodyAnalyzer:
         # intended behavior for "slow / halting" delivery.
         if audio_duration_sec > 0:
             speaking_rate_wpm = word_count / (audio_duration_sec / 60.0)
+            syllable_count = sum(self._syllables(w.w) for w in transcript.words)
+            speaking_rate_sps = syllable_count / audio_duration_sec
         else:
             speaking_rate_wpm = 0.0
+            speaking_rate_sps = 0.0
 
         filler_rate = self._filler_rate(transcript)
         pause_count, pause_total, pause_mean = self._pause_stats(transcript)
 
         return ProsodyFeatures(
             speaking_rate_wpm=speaking_rate_wpm,
-            speaking_rate_sps=0.0,
+            speaking_rate_sps=speaking_rate_sps,
             pause_count=pause_count,
             pause_total_seconds=pause_total,
             pause_mean_seconds=pause_mean,
             filler_rate=filler_rate,
         )
+
+    @staticmethod
+    def _syllables(word: str) -> int:
+        """Estimate syllables in a word via vowel-cluster count, floor 1."""
+        clusters = len(_VOWEL_RUN.findall(word.lower()))
+        return clusters if clusters > 0 else 1
 
     def _pause_stats(
         self, transcript: Transcript

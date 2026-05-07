@@ -122,3 +122,42 @@ class TestPauseStatistics:
         assert features.pause_count == 2
         assert features.pause_total_seconds == pytest.approx(1.7)
         assert features.pause_mean_seconds == pytest.approx(0.85)
+
+
+class TestSpeakingRateSps:
+    def test_sps_uses_vowel_cluster_syllable_estimator(self) -> None:
+        """speaking_rate_sps = total_syllables / audio_duration_sec.
+
+        Syllable count per word is the number of vowel clusters
+        (regex [aeiouy]+) with a floor of 1. For ``["hello", "world"]``
+        that's ``hello`` -> 2 (h-E-ll-O) and ``world`` -> 1 (w-OR-ld) for
+        a total of 3 syllables. Over 1.0 second of audio, sps = 3.0."""
+        from vsa.features.prosody import ProsodyAnalyzer
+
+        words = [("hello", 0.0, 0.4), ("world", 0.5, 0.9)]
+        transcript = _make_transcript(words)
+
+        features = ProsodyAnalyzer().analyze(transcript, audio_duration_sec=1.0)
+        assert features.speaking_rate_sps == pytest.approx(3.0)
+
+
+class TestEmptyTranscript:
+    def test_empty_transcript_returns_all_zeros_no_division_errors(self) -> None:
+        """Slice 3's sine-wave fixture transcribes to an empty word list.
+
+        ProsodyAnalyzer must produce a fully-populated ProsodyFeatures with
+        every numeric field at 0.0/0 — and crucially, must not divide by
+        zero when computing means or rates."""
+        from vsa.features.prosody import ProsodyAnalyzer
+
+        empty = Transcript(
+            engine="parakeet-tdt-0.6b-v2", language="en", text="", words=[]
+        )
+
+        features = ProsodyAnalyzer().analyze(empty, audio_duration_sec=1.0)
+        assert features.speaking_rate_wpm == 0.0
+        assert features.speaking_rate_sps == 0.0
+        assert features.pause_count == 0
+        assert features.pause_total_seconds == 0.0
+        assert features.pause_mean_seconds == 0.0
+        assert features.filler_rate == 0.0
