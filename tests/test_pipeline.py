@@ -76,12 +76,12 @@ class TestPipeline:
         assert result.audio.channels == 1
         assert abs(result.audio.duration_seconds - 1.0) < 0.1
 
-        # Slices 2+3+5 wire up acoustic, transcription, and emotion;
-        # remaining sections are still None.
+        # Slices 2+3+5+4 wire up acoustic, transcription, emotion, and
+        # prosody; remaining sections are still None.
         assert result.transcription is not None
         assert result.acoustic is not None
         assert result.emotion is not None
-        assert result.prosody is None
+        assert result.prosody is not None
         assert result.composite is None
         assert result.windows is None
 
@@ -226,6 +226,30 @@ class TestPipeline:
         assert result.emotion.dimensional.arousal == pytest.approx(0.42)
         assert result.emotion.categorical is not None
         assert result.emotion.categorical.label == "happy"
+        assert result.processing.errors == []
+
+
+    @pytest.mark.asyncio
+    async def test_analyze_populates_prosody_section(
+        self, fixture_wav_path: Path
+    ) -> None:
+        """Pipeline.analyze runs ProsodyAnalyzer when transcription succeeds.
+
+        Even with a stub transcript that has no words (the shape Slice 3's
+        sine-wave fixture produces today), prosody should populate with
+        zero-valued fields rather than being None."""
+        from vsa.schema import ProsodyFeatures
+
+        pipeline = Pipeline(
+            transcriber=_StubTranscriber(),
+            emotion_analyzer=_StubEmotionAnalyzer(),
+        )
+        result = await pipeline.analyze(fixture_wav_path)
+
+        assert isinstance(result.prosody, ProsodyFeatures)
+        assert result.prosody.speaking_rate_wpm == 0.0
+        assert result.prosody.pause_count == 0
+        assert result.prosody.filler_rate == 0.0
         assert result.processing.errors == []
 
 
