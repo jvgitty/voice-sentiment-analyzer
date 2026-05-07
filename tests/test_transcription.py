@@ -46,3 +46,26 @@ class TestTranscriberInterface:
         # Protocol/ABC: anything with .transcribe(audio_path) -> Transcript
         # qualifies. Just verify the symbol exists.
         assert Transcriber is not None
+
+
+class TestParakeetTranscriberConstruction:
+    def test_class_importable(self) -> None:
+        from vsa.transcription.parakeet import ParakeetTranscriber
+
+        assert ParakeetTranscriber is not None
+
+    def test_constructor_does_not_load_model(self) -> None:
+        """Lazy-load contract: constructing the transcriber must not pull
+        the model into memory. The ~2GB model is only loaded the first time
+        ``transcribe`` is called."""
+        from vsa.transcription.parakeet import ParakeetTranscriber
+
+        transcriber = ParakeetTranscriber()
+        # The internal model handle must be unset until transcribe() runs.
+        assert transcriber._model is None
+
+    def test_engine_name_advertised(self) -> None:
+        from vsa.transcription.parakeet import ParakeetTranscriber
+
+        transcriber = ParakeetTranscriber()
+        assert transcriber.engine == "parakeet-tdt-0.6b-v2"
