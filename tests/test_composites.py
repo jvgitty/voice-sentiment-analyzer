@@ -371,3 +371,39 @@ class TestOutputRangeInvariant:
                 assert 0.0 <= v <= 1.0, (
                     f"{name}={v} for inputs={inputs!r}"
                 )
+
+
+class TestPartialSuccessEmotionMissing:
+    """If emotion is None (e.g. the wav2vec2 model crashed earlier), the
+    composites that reference emotion components must skip those
+    components and re-normalize the remaining weights so the rest of the
+    formula still produces a value in [0, 1].
+
+    Concretely: confidence loses dominance (weight 0.20), engagement loses
+    arousal (0.30), calmness loses low_arousal (0.30) and
+    positive_valence_bias (0.10). All three composites must still score
+    successfully.
+    """
+
+    def test_all_three_composites_still_score_when_emotion_is_none(self) -> None:
+        scorer = CompositeScorer.from_yaml(COMPOSITES_YAML)
+        inputs = ScoreInputs(
+            acoustic=_make_acoustic(),
+            prosody=_make_prosody(),
+            emotion=None,
+            audio_duration_seconds=10.0,
+        )
+        out = scorer.score(inputs)
+        # All three composites still scored.
+        assert out.confidence is not None
+        assert out.engagement is not None
+        assert out.calmness is not None
+        # All in [0, 1] (re-normalization preserves the bound).
+        for name in ("confidence", "engagement", "calmness"):
+            v = getattr(out, name)
+            assert 0.0 <= v <= 1.0, f"{name}={v}"
+        # The skipped components show up as None in _components.
+        assert out.components["confidence"]["dominance"] is None
+        assert out.components["engagement"]["arousal"] is None
+        assert out.components["calmness"]["low_arousal"] is None
+        assert out.components["calmness"]["positive_valence_bias"] is None
