@@ -36,6 +36,30 @@ class TestFasterWhisperTranscriberConstruction:
         transcriber = FasterWhisperTranscriber()
         assert transcriber.engine.startswith("faster-whisper-")
 
+    def test_whisper_model_env_var_sets_engine_string(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``WHISPER_MODEL`` is the operator's switch for tiny/base/small/
+        medium/large. We don't actually load ``tiny`` here (still slow on
+        cold cache) — only assert that the engine string reflects the
+        chosen size at construction time."""
+        from vsa.transcription.whisper import FasterWhisperTranscriber
+
+        monkeypatch.setenv("WHISPER_MODEL", "tiny")
+        transcriber = FasterWhisperTranscriber()
+        assert transcriber.engine == "faster-whisper-tiny"
+
+    def test_whisper_model_env_var_default_is_small(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec'd default is ``small``. Unset env var must produce the
+        ``faster-whisper-small`` engine string."""
+        from vsa.transcription.whisper import FasterWhisperTranscriber
+
+        monkeypatch.delenv("WHISPER_MODEL", raising=False)
+        transcriber = FasterWhisperTranscriber()
+        assert transcriber.engine == "faster-whisper-small"
+
 
 class TestFasterWhisperTranscriberSmoke:
     """Smoke tests that exercise the real faster-whisper model. The fixture
