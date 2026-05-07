@@ -50,11 +50,17 @@ class AcousticAnalyzer:
         harmonicity = sound.to_harmonicity()
         hnr_db = float(call(harmonicity, "Get mean", 0, 0))
 
-        # Spectral features via librosa. Load audio mono so MFCCs are
-        # deterministic shape (13, n_frames).
+        # Spectral and loudness features via librosa.
         y, sr = librosa.load(str(audio_path), sr=None, mono=True)
         mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
         mfcc_means = [float(v) for v in mfcc.mean(axis=1)]
+
+        # Frame-wise RMS amplitude; convert to dB FS via amplitude_to_db.
+        rms = librosa.feature.rms(y=y).flatten()
+        rms_mean = float(rms.mean())
+        rms_db = librosa.amplitude_to_db(rms, ref=1.0)
+        loudness_mean_db = float(rms_db.mean())
+        loudness_std_db = float(rms_db.std())
 
         return AcousticFeatures(
             pitch=PitchFeatures(
@@ -65,7 +71,11 @@ class AcousticAnalyzer:
                 max_hz=0.0,
                 range_hz=0.0,
             ),
-            loudness=LoudnessFeatures(mean_db=0.0, std_db=0.0, rms_mean=0.0),
+            loudness=LoudnessFeatures(
+                mean_db=loudness_mean_db,
+                std_db=loudness_std_db,
+                rms_mean=rms_mean,
+            ),
             voice_quality=VoiceQualityFeatures(
                 jitter_local=jitter_local,
                 shimmer_local=shimmer_local,

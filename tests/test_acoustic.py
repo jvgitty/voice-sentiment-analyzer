@@ -110,3 +110,26 @@ class TestAcousticAnalyzer:
         # Default-stub list is all zeros; force a real implementation by
         # asserting at least one MFCC coefficient is non-zero.
         assert any(v != 0.0 for v in mfcc)
+
+    def test_loudness_rms_mean_non_negative_and_mean_db_finite(
+        self, fixture_wav_path: Path
+    ) -> None:
+        """RMS amplitude is bounded below by 0 by definition.
+
+        mean_db is in dB FS so negative values are normal and expected (a
+        non-clipped sine sits below 0 dB FS). The contract is just 'finite'.
+        """
+        import math
+
+        from vsa.features.acoustic import AcousticAnalyzer
+
+        analyzer = AcousticAnalyzer()
+        features = analyzer.analyze(fixture_wav_path)
+        loudness = features.loudness
+
+        assert isinstance(loudness.rms_mean, float)
+        assert loudness.rms_mean >= 0.0
+        # Force real implementation: a non-silent fixture should have RMS > 0.
+        assert loudness.rms_mean > 0.0
+        assert isinstance(loudness.mean_db, float)
+        assert math.isfinite(loudness.mean_db)
