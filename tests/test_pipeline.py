@@ -76,14 +76,18 @@ class TestPipeline:
         assert result.audio.channels == 1
         assert abs(result.audio.duration_seconds - 1.0) < 0.1
 
-        # Slices 2+3+4+5+6 wire up acoustic, transcription, prosody,
-        # emotion, and composite; only windows is still None.
+        # Slices 2+3+4+5+6+7 wire up every section; windows is now a
+        # non-empty list of WindowMetrics covering the full audio.
+        from vsa.schema import WindowMetrics
+
         assert result.transcription is not None
         assert result.acoustic is not None
         assert result.emotion is not None
         assert result.prosody is not None
         assert result.composite is not None
-        assert result.windows is None
+        assert isinstance(result.windows, list)
+        assert len(result.windows) >= 1
+        assert all(isinstance(w, WindowMetrics) for w in result.windows)
 
         # processing block is populated and errors[] is empty
         assert result.processing.errors == []
@@ -335,7 +339,9 @@ class TestPipeline:
         processing.errors. Other sections still populate."""
         from vsa.composites import CompositeScorer
 
-        def boom(self: CompositeScorer, inputs) -> None:
+        def boom(self: CompositeScorer, inputs, *args, **kwargs) -> None:
+            # *args/**kwargs swallow Slice 7's overrides= kwarg without
+            # this stub having to know about it.
             raise RuntimeError("synthetic composite failure")
 
         monkeypatch.setattr(CompositeScorer, "score", boom)
@@ -382,6 +388,40 @@ class TestPipeline:
         assert 0.0 <= result.composite.engagement <= 1.0
         assert 0.0 <= result.composite.calmness <= 1.0
         assert result.processing.errors == []
+
+
+    @pytest.mark.asyncio
+    async def test_windowed_failure_sets_windows_none_and_logs_error(
+        self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Partial-success contract: when WindowedAnalyzer.analyze raises,
+        result.windows is None, an entry is appended to processing.errors,
+        and every other section (acoustic / transcription / emotion /
+        prosody / composite) still populates."""
+        from vsa.windowed import WindowedAnalyzer
+
+        def boom(self, **kwargs) -> None:
+            raise RuntimeError("synthetic windowed failure")
+
+        monkeypatch.setattr(WindowedAnalyzer, "analyze", boom)
+
+        pipeline = Pipeline(
+            transcriber=_StubTranscriber(),
+            emotion_analyzer=_StubEmotionAnalyzer(),
+        )
+        result = await pipeline.analyze(fixture_wav_path)
+
+        assert result.windows is None
+        assert any(
+            "window" in err.lower() and "synthetic" in err
+            for err in result.processing.errors
+        ), result.processing.errors
+        # Other sections continue running.
+        assert result.acoustic is not None
+        assert result.transcription is not None
+        assert result.emotion is not None
+        assert result.prosody is not None
+        assert result.composite is not None
 
 
     @pytest.mark.asyncio

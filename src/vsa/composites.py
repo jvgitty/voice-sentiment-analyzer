@@ -237,7 +237,11 @@ class CompositeScorer:
             }
         return out
 
-    def score(self, inputs: ScoreInputs) -> CompositeScores:
+    def score(
+        self,
+        inputs: ScoreInputs,
+        overrides: Optional[dict[str, Optional[float]]] = None,
+    ) -> CompositeScores:
         """Compute every composite the YAML declares.
 
         Partial-success: a component whose registered callable returns
@@ -245,11 +249,19 @@ class CompositeScorer:
         re-normalized so they still sum to 1.0. If every component for a
         composite is unavailable, the composite is None and an entry is
         appended to ``self._last_errors`` (read by the pipeline).
+
+        ``overrides`` lets the caller supply a precomputed value for a
+        named subscore, bypassing the registry callable. Slice 7 uses
+        this to inject ``energy_steadiness`` derived from per-window
+        loudness CoV — the registry's placeholder still ships for back-
+        compat when no override is provided. ``None`` in an override
+        means "force this component as unavailable" (re-normalize away).
         """
         scores: dict[str, Optional[float]] = {}
         components: dict[str, dict[str, Optional[float]]] = {}
         formulas: dict[str, list[str]] = {}
         errors: list[str] = []
+        overrides = overrides or {}
 
         for composite_name, body in self._config.items():
             comp_specs = body.get("components", [])
@@ -265,17 +277,23 @@ class CompositeScorer:
             for spec in comp_specs:
                 name = spec["name"]
                 weight = float(spec["weight"])
-                fn = SUBSCORE_REGISTRY.get(name)
-                if fn is None:
-                    # Defensive: a YAML name with no registered callable
-                    # is treated as unavailable rather than crashing.
-                    unavailable.append(name)
-                    continue
-                raw = fn(inputs)
+                # Override path takes precedence: a caller-supplied value
+                # short-circuits the registry callable entirely.
+                if name in overrides:
+                    raw = overrides[name]
+                else:
+                    fn = SUBSCORE_REGISTRY.get(name)
+                    if fn is None:
+                        # Defensive: a YAML name with no registered
+                        # callable is treated as unavailable rather than
+                        # crashing.
+                        unavailable.append(name)
+                        continue
+                    raw = fn(inputs)
                 if raw is None:
                     unavailable.append(name)
                 else:
-                    available.append((name, weight, raw))
+                    available.append((name, weight, float(raw)))
                     total_weight += weight
 
             comp_breakdown: dict[str, Optional[float]] = {}

@@ -113,6 +113,26 @@ class ProsodyFeatures(BaseModel):
     filler_rate: float
 
 
+class WindowMetrics(BaseModel):
+    """Headline metrics over a single time-tiled audio window (Slice 7).
+
+    A ``WindowedAnalyzer`` produces a list of these tiling
+    ``[0, audio_duration)`` with no gaps and no overlaps. The last window
+    may be shorter when the duration does not divide evenly. Every metric
+    field is ``Optional`` so a window where one analyzer failed (or was
+    skipped to keep cost bounded) still serializes."""
+
+    start_sec: float
+    end_sec: float
+    pitch_mean_hz: Optional[float] = None
+    loudness_mean_db: Optional[float] = None
+    arousal: Optional[float] = None
+    valence: Optional[float] = None
+    confidence: Optional[float] = None
+    engagement: Optional[float] = None
+    calmness: Optional[float] = None
+
+
 class AnalyzeResult(BaseModel):
     schema_version: str = "1.0"
     audio: AudioInfo
@@ -125,7 +145,10 @@ class AnalyzeResult(BaseModel):
     # forward-string-style ``Any`` to avoid a circular import: schema is
     # imported by composites for ScoreInputs.
     composite: Optional[Any] = None
-    windows: Optional[Any] = None
+    # Per-window headline metrics from the WindowedAnalyzer (Slice 7);
+    # None when windowing failed outright. Empty list is a valid value
+    # but unusual: even a sub-window-length audio yields one entry.
+    windows: Optional[list[WindowMetrics]] = None
     processing: ProcessingInfo
 
 
