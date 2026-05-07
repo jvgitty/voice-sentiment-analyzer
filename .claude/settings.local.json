@@ -30,7 +30,9 @@
       "Bash(.venv/Scripts/python.exe -m pytest tests/test_pipeline.py -x)",
       "Bash(.venv/Scripts/python.exe -m pytest tests/test_api.py -x)",
       "Bash(.venv/Scripts/python.exe -m pytest tests/test_api.py::TestAnalyzeEndpoint::test_missing_authorization_returns_401 -x)",
-      "Bash(.venv/Scripts/python.exe -m pytest tests/test_api.py)"
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_api.py)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_api.py::TestAnalyzeEndpoint::test_full_happy_path_returns_result_and_fires_signed_callback -x)",
+      "Bash(.venv/Scripts/python.exe -m pytest)"
     ]
   }
 }
