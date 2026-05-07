@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"D:\\\\Code\\\\voice-sentiment-analyzer\")",
+      "PowerShell(gh auth status)",
+      "PowerShell(Get-Command gh -ErrorAction SilentlyContinue; if \\($?\\) {} else { Get-ChildItem \"C:\\\\Program Files\\\\GitHub CLI\", \"$env:LOCALAPPDATA\\\\Programs\\\\gh\", \"$env:LOCALAPPDATA\\\\GitHubCLI\" -ErrorAction SilentlyContinue -Filter \"gh.exe\" -Recurse | Select-Object -First 3 FullName })",
+      "Bash(cmd.exe /c \"where winget 2>nul & where gh 2>nul & echo ---PATH---\")",
+      "Bash(choco --version)",
+      "Bash(where gh *)",
+      "Bash(where winget *)",
+      "Bash(choco install *)",
+      "PowerShell($bin = \"C:\\\\Users\\\\jvvvc\\\\bin\"; if \\(-not \\(Test-Path $bin\\)\\) { New-Item -ItemType Directory -Path $bin -Force | Out-Null }; $zip = \"$env:TEMP\\\\gh.zip\"; $extract = \"$env:TEMP\\\\gh_extract\"; if \\(Test-Path $extract\\) { Remove-Item $extract -Recurse -Force }; Invoke-WebRequest -Uri \"https://github.com/cli/cli/releases/download/v2.92.0/gh_2.92.0_windows_amd64.zip\" -OutFile $zip -UseBasicParsing; Expand-Archive -Path $zip -DestinationPath $extract -Force; $exe = Get-ChildItem $extract -Recurse -Filter \"gh.exe\" | Select-Object -First 1; Copy-Item $exe.FullName -Destination \"$bin\\\\gh.exe\" -Force; \"Installed gh.exe to $bin\"; & \"$bin\\\\gh.exe\" --version)",
+      "Bash(gh --version)",
+      "Bash(gh auth *)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(rm .tmp_slice_*.md)",
+      "Bash(gh issue *)",
+      "Bash(git checkout *)",
+      "Bash(py -m venv .venv)",
+      "Bash(.venv/Scripts/python.exe -m pip install --upgrade pip)",
+      "Bash(.venv/Scripts/python.exe -m pip install -e \".[dev]\")",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_auth.py -x)"
+    ]
+  }
+}
