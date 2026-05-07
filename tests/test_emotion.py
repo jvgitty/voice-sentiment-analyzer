@@ -153,3 +153,60 @@ class TestEmotionAnalyzerSmoke:
             assert isinstance(v, float)
             assert v >= 0.0
         assert sum(c.scores.values()) == pytest.approx(1.0, abs=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# Cycles 4+5: independent failure isolation between the two models.
+# ---------------------------------------------------------------------------
+
+
+class TestEmotionAnalyzerFailureIsolation:
+    """If one underlying emotion model crashes, the other section must
+    still populate. The analyzer-level partial-success contract: per the
+    Slice 5 brief and PRD acceptance criteria, an EmotionAnalyzer must
+    handle each model's failure independently."""
+
+    def test_dimensional_failure_leaves_categorical_populated(
+        self,
+        emotion_analyzer,
+        fixture_wav_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Force the dimensional inference path to raise. Categorical
+        should still produce a CategoricalEmotion section."""
+        from vsa.features.emotion import EmotionAnalyzer
+
+        def boom(self: EmotionAnalyzer, audio_path: Path) -> Any:
+            raise RuntimeError("synthetic dimensional failure")
+
+        monkeypatch.setattr(EmotionAnalyzer, "_run_dimensional", boom)
+
+        result = emotion_analyzer.analyze(fixture_wav_path)
+        assert result.dimensional is None
+        assert result.categorical is not None
+        assert result.categorical.label in _IEMOCAP_LABELS
+
+    def test_categorical_failure_leaves_dimensional_populated(
+        self,
+        emotion_analyzer,
+        fixture_wav_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Mirror of the previous test: categorical raises, dimensional
+        section is still produced."""
+        from vsa.features.emotion import EmotionAnalyzer
+
+        def boom(self: EmotionAnalyzer, audio_path: Path) -> Any:
+            raise RuntimeError("synthetic categorical failure")
+
+        monkeypatch.setattr(EmotionAnalyzer, "_run_categorical", boom)
+
+        result = emotion_analyzer.analyze(fixture_wav_path)
+        assert result.categorical is None
+        assert result.dimensional is not None
+        for v in (
+            result.dimensional.arousal,
+            result.dimensional.valence,
+            result.dimensional.dominance,
+        ):
+            assert 0.0 <= v <= 1.0
