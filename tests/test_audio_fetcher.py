@@ -1,5 +1,7 @@
 """Tests for AudioFetcher."""
 
+from pathlib import Path
+
 import httpx
 import pytest
 import respx
@@ -55,3 +57,33 @@ class TestAudioFetcher:
             fetcher = AudioFetcher(max_bytes=1_000_000, allowed_types=ALLOWED)
             with pytest.raises(InvalidContentTypeError):
                 await fetcher.fetch(url)
+
+    @pytest.mark.asyncio
+    async def test_cleans_up_tmp_file_on_mid_download_exception(self) -> None:
+        """When the body stream exceeds max_bytes mid-flight, /tmp file must be deleted."""
+        import tempfile
+
+        url = "https://example.test/audio.wav"
+        max_bytes = 100
+        # Body bigger than max_bytes, no Content-Length header so the upfront check passes
+        # and we fall through to the streamed-bytes check, which raises and triggers cleanup.
+        body = b"x" * (max_bytes * 2)
+
+        with respx.mock(assert_all_called=True) as respx_mock:
+            respx_mock.get(url).mock(
+                return_value=httpx.Response(
+                    200,
+                    headers={"Content-Type": "audio/wav"},  # no Content-Length
+                    content=body,
+                )
+            )
+            fetcher = AudioFetcher(max_bytes=max_bytes, allowed_types=ALLOWED)
+
+            tmp_root = Path(tempfile.gettempdir())
+            before = set(tmp_root.glob("vsa-fetch-*.audio"))
+
+            with pytest.raises(ContentTooLargeError):
+                await fetcher.fetch(url)
+
+            after = set(tmp_root.glob("vsa-fetch-*.audio"))
+            assert after == before, f"leftover tmp files: {after - before}"
