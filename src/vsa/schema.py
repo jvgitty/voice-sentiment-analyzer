@@ -99,12 +99,26 @@ class Transcript(BaseModel):
     words: list[Word] = Field(default_factory=list)
 
 
+class ProsodyFeatures(BaseModel):
+    """Prosody-level features derived from a Transcript + audio duration.
+
+    All fields are derived purely from text/timestamps — no model load.
+    See ``vsa.features.prosody.ProsodyAnalyzer`` for the formulas."""
+
+    speaking_rate_wpm: float
+    speaking_rate_sps: float
+    pause_count: int
+    pause_total_seconds: float
+    pause_mean_seconds: float
+    filler_rate: float
+
+
 class AnalyzeResult(BaseModel):
     schema_version: str = "1.0"
     audio: AudioInfo
     transcription: Optional[Transcript] = None
     acoustic: Optional[AcousticFeatures] = None
-    prosody: Optional[Any] = None
+    prosody: Optional[ProsodyFeatures] = None
     emotion: Optional[EmotionResult] = None
     composite: Optional[Any] = None
     windows: Optional[Any] = None
