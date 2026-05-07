@@ -29,7 +29,8 @@
       "Bash(.venv/Scripts/python.exe -m pytest tests/test_audio_fetcher.py::TestAudioFetcher::test_cleans_up_tmp_file_on_mid_download_exception -x)",
       "Bash(.venv/Scripts/python.exe -m pytest tests/test_pipeline.py -x)",
       "Bash(.venv/Scripts/python.exe -m pytest tests/test_api.py -x)",
-      "Bash(.venv/Scripts/python.exe -m pytest tests/test_api.py::TestAnalyzeEndpoint::test_missing_authorization_returns_401 -x)"
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_api.py::TestAnalyzeEndpoint::test_missing_authorization_returns_401 -x)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_api.py)"
     ]
   }
 }

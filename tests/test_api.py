@@ -23,7 +23,12 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 class TestAnalyzeEndpoint:
     def test_empty_body_returns_422(self, client: TestClient) -> None:
-        response = client.post("/analyze", json={})
+        # Valid auth so we exercise body validation specifically, not the auth gate.
+        response = client.post(
+            "/analyze",
+            json={},
+            headers={"Authorization": "Bearer test-key"},
+        )
         assert response.status_code == 422
 
     def test_missing_authorization_returns_401(self, client: TestClient) -> None:
