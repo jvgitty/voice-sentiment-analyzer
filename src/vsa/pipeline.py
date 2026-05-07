@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from vsa import __version__ as _vsa_version
 from vsa.features.acoustic import AcousticAnalyzer
 from vsa.features.emotion import EmotionAnalyzer
+from vsa.features.prosody import ProsodyAnalyzer
 from vsa.schema import AnalyzeResult, AudioInfo, ProcessingInfo
 
 if TYPE_CHECKING:
@@ -20,6 +21,7 @@ class Pipeline:
         acoustic_analyzer: AcousticAnalyzer | None = None,
         transcriber: "Transcriber | None" = None,
         emotion_analyzer: EmotionAnalyzer | None = None,
+        prosody_analyzer: ProsodyAnalyzer | None = None,
     ) -> None:
         self._acoustic = acoustic_analyzer or AcousticAnalyzer()
         # Default: NeMo-backed Parakeet TDT. Constructed eagerly because
@@ -34,6 +36,11 @@ class Pipeline:
         # wav2vec2 backbones on the first .analyze() call. Tests inject a
         # stub via emotion_analyzer= to skip that ~GBs cold-start.
         self._emotion = emotion_analyzer or EmotionAnalyzer()
+        # ProsodyAnalyzer is pure-function and trivially cheap; no lazy
+        # loading needed. It runs after transcription (because it
+        # consumes the transcript) and after acoustic+emotion (so its
+        # failure can't take them down).
+        self._prosody = prosody_analyzer or ProsodyAnalyzer()
 
     async def analyze(self, audio_path: Path) -> AnalyzeResult:
         started_at = datetime.now(timezone.utc)
@@ -72,6 +79,22 @@ class Pipeline:
             emotion = None
             errors.append(f"emotion analysis failed: {e}")
 
+        # Prosody runs last among the feature analyzers so its failure
+        # cannot take down acoustic/emotion. It also depends on the
+        # Transcript: when transcription failed earlier we have no input,
+        # so prosody is set to None and a dedicated error is logged.
+        if transcription is None:
+            prosody = None
+            errors.append(
+                "prosody skipped: transcription unavailable"
+            )
+        else:
+            try:
+                prosody = self._prosody.analyze(transcription, duration_seconds)
+            except Exception as e:  # noqa: BLE001 -- partial-success contract
+                prosody = None
+                errors.append(f"prosody analysis failed: {e}")
+
         completed_at = datetime.now(timezone.utc)
 
         return AnalyzeResult(
@@ -83,6 +106,7 @@ class Pipeline:
             transcription=transcription,
             acoustic=acoustic,
             emotion=emotion,
+            prosody=prosody,
             processing=ProcessingInfo(
                 started_at=started_at,
                 completed_at=completed_at,
