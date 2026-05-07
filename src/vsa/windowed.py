@@ -39,4 +39,11 @@ class WindowedAnalyzer:
         while start + self._window_seconds <= audio_duration_sec:
             tiles.append((start, start + self._window_seconds))
             start += self._window_seconds
+        # Partial trailing window so coverage extends to the audio end.
+        # ``start < audio_duration_sec`` is the only safe condition: float
+        # rounding means the equality case may register either as a clean
+        # multiple (already handled above) or a sub-microsecond tail; the
+        # latter we accept rather than introducing an epsilon.
+        if start < audio_duration_sec:
+            tiles.append((start, float(audio_duration_sec)))
         return tiles

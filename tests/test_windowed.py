@@ -45,3 +45,21 @@ class TestWindowedAnalyzerTiling:
         analyzer = WindowedAnalyzer(window_seconds=30.0)
         tiles = analyzer._tile(audio_duration_sec=60.0)
         assert tiles == [(0.0, 30.0), (30.0, 60.0)]
+
+    def test_partial_last_window_is_included_with_full_coverage(self) -> None:
+        """Audio not divisible by window_seconds produces a shorter final
+        window covering the remainder. Tiles must have no gaps, no
+        overlaps, and cover [0, duration) exactly."""
+        from vsa.windowed import WindowedAnalyzer
+
+        analyzer = WindowedAnalyzer(window_seconds=30.0)
+        tiles = analyzer._tile(audio_duration_sec=70.0)
+        assert tiles == [(0.0, 30.0), (30.0, 60.0), (60.0, 70.0)]
+        # Coverage invariants: first window starts at 0, last ends at
+        # duration, and each tile starts where the previous ended.
+        assert tiles[0][0] == 0.0
+        assert tiles[-1][1] == 70.0
+        for prev, curr in zip(tiles, tiles[1:]):
+            assert curr[0] == prev[1], (
+                f"gap or overlap between {prev} and {curr}"
+            )
