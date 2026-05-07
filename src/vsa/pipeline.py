@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vsa import __version__ as _vsa_version
+from vsa.composites import CompositeScorer, ScoreInputs
 from vsa.features.acoustic import AcousticAnalyzer
 from vsa.features.emotion import EmotionAnalyzer
 from vsa.features.prosody import ProsodyAnalyzer
@@ -15,6 +16,14 @@ if TYPE_CHECKING:
     from vsa.transcription.base import Transcriber
 
 
+# composites.yaml lives at the repo root; it's the editable spec for the
+# three composite formulas. Resolved relative to this file so the test
+# suite (which runs with cwd=tests/...) finds it without env tricks.
+_COMPOSITES_YAML_PATH = (
+    Path(__file__).resolve().parent.parent.parent / "composites.yaml"
+)
+
+
 class Pipeline:
     def __init__(
         self,
@@ -22,6 +31,7 @@ class Pipeline:
         transcriber: "Transcriber | None" = None,
         emotion_analyzer: EmotionAnalyzer | None = None,
         prosody_analyzer: ProsodyAnalyzer | None = None,
+        composite_scorer: CompositeScorer | None = None,
     ) -> None:
         self._acoustic = acoustic_analyzer or AcousticAnalyzer()
         # Default: NeMo-backed Parakeet TDT. Constructed eagerly because
@@ -41,6 +51,13 @@ class Pipeline:
         # consumes the transcript) and after acoustic+emotion (so its
         # failure can't take them down).
         self._prosody = prosody_analyzer or ProsodyAnalyzer()
+        # CompositeScorer loads composites.yaml (the editable spec) and
+        # runs at the very end, after every feature analyzer. The YAML
+        # lives at the repo root; tests can inject a stub via
+        # composite_scorer= to skip the file load.
+        self._composite_scorer = composite_scorer or CompositeScorer.from_yaml(
+            _COMPOSITES_YAML_PATH
+        )
 
     async def analyze(self, audio_path: Path) -> AnalyzeResult:
         started_at = datetime.now(timezone.utc)
@@ -95,6 +112,27 @@ class Pipeline:
                 prosody = None
                 errors.append(f"prosody analysis failed: {e}")
 
+        # Composite scoring runs last because it consumes everything
+        # above. A whole-scorer crash (config error, registry mismatch)
+        # nulls the composite section but does not take down the rest of
+        # the pipeline — same partial-success contract as every other
+        # analyzer. Per-composite failures (a missing input nulling out
+        # one composite while others succeed) are the scorer's own job
+        # and surface as scorer.last_errors.
+        try:
+            composite = self._composite_scorer.score(
+                ScoreInputs(
+                    acoustic=acoustic,
+                    prosody=prosody,
+                    emotion=emotion,
+                    audio_duration_seconds=duration_seconds,
+                )
+            )
+            errors.extend(self._composite_scorer.last_errors)
+        except Exception as e:  # noqa: BLE001 -- partial-success contract
+            composite = None
+            errors.append(f"composite scoring failed: {e}")
+
         completed_at = datetime.now(timezone.utc)
 
         return AnalyzeResult(
@@ -107,6 +145,7 @@ class Pipeline:
             acoustic=acoustic,
             emotion=emotion,
             prosody=prosody,
+            composite=composite,
             processing=ProcessingInfo(
                 started_at=started_at,
                 completed_at=completed_at,

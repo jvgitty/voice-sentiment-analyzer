@@ -120,6 +120,10 @@ class AnalyzeResult(BaseModel):
     acoustic: Optional[AcousticFeatures] = None
     prosody: Optional[ProsodyFeatures] = None
     emotion: Optional[EmotionResult] = None
+    # ``composite`` is a vsa.composites.CompositeScores when scoring
+    # succeeds, ``None`` when the scorer raised. The annotation is a
+    # forward-string-style ``Any`` to avoid a circular import: schema is
+    # imported by composites for ScoreInputs.
     composite: Optional[Any] = None
     windows: Optional[Any] = None
     processing: ProcessingInfo

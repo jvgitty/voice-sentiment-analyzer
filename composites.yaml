@@ -1,0 +1,106 @@
+# composites.yaml — the editable spec for confidence / engagement / calmness.
+#
+# This file is the source of truth for the three composite scores. Every
+# weight, every clinical threshold, and every contributing subscore lives
+# here so anyone reading the repo (or watching the demo) can fork the file
+# and disagree without touching code.
+#
+# How a composite is computed:
+#   - Each `components[*]` is a normalized subscore in [0, 1].
+#   - The composite is the weighted sum of its components: sum(w_i * s_i).
+#   - With weights summing to 1.0 the output stays in [0, 1].
+#   - `normalize(x, lo, hi)` is min-max clipped to [0, 1] (lo -> 0, hi -> 1).
+#
+# Partial-success behavior (slice 6):
+#   - If a required input feature is missing (e.g. emotion failed), the
+#     composite SKIPS the affected components and re-normalizes the
+#     remaining weights so they still sum to 1.0. The skipped component's
+#     contribution shows up as null in `_components`.
+#   - If EVERY component for a composite is unavailable, the composite
+#     itself is null and a string is appended to processing.errors.
+#
+# Threshold provenance:
+#   - Jitter (0.005..0.025) and shimmer (0.02..0.10) ranges follow the
+#     normal/abnormal bands cited in Boone & McFarlane, "The Voice and
+#     Voice Therapy."
+#   - Dimensional arousal/valence/dominance use the audeering MSP-Podcast
+#     wav2vec2 model's [0, 1] outputs directly.
+#   - Other thresholds are marked "tunable, not clinical" and are the
+#     author's defaults; fork and tune to taste.
+#
+# Slice 7 will add windowed scoring; the energy_steadiness and
+# pace_steadiness components are placeholders (1.0) in slice 6 because
+# they need windowed CoV data that does not exist yet.
+
+confidence:
+  components:
+    - name: jitter_steadiness
+      source: "1 - normalize(acoustic.voice_quality.jitter_local, 0.005, 0.025)"
+      weight: 0.20
+      threshold_provenance: "Boone & McFarlane jitter normal/abnormal range"
+    - name: shimmer_steadiness
+      source: "1 - normalize(acoustic.voice_quality.shimmer_local, 0.02, 0.10)"
+      weight: 0.15
+      threshold_provenance: "Boone & McFarlane shimmer normal/abnormal range"
+    - name: energy_steadiness
+      source: "energy_steadiness(acoustic.loudness)"
+      weight: 0.20
+      threshold_provenance: "tunable, not clinical; placeholder 1.0 until slice 7 (windows) lands"
+    - name: low_filler_rate
+      source: "1 - normalize(prosody.filler_rate, 0.0, 0.08)"
+      weight: 0.15
+      threshold_provenance: "tunable, not clinical"
+    - name: pace_steadiness
+      source: "pace_steadiness(prosody.speaking_rate_wpm)"
+      weight: 0.10
+      threshold_provenance: "tunable, not clinical; placeholder 1.0 until slice 7 (windows) lands"
+    - name: dominance
+      source: "emotion.dimensional.dominance"
+      weight: 0.20
+      threshold_provenance: "audeering MSP-Podcast dominance dimension (0..1)"
+
+engagement:
+  components:
+    - name: pitch_range
+      source: "normalize(acoustic.pitch.range_hz, 50, 200)"
+      weight: 0.25
+      threshold_provenance: "tunable, not clinical"
+    - name: loudness_variability
+      source: "normalize(acoustic.loudness.std_db, 1, 8)"
+      weight: 0.15
+      threshold_provenance: "tunable, not clinical"
+    - name: arousal
+      source: "emotion.dimensional.arousal"
+      weight: 0.30
+      threshold_provenance: "audeering MSP-Podcast arousal dimension (0..1)"
+    - name: speaking_rate
+      source: "normalize(prosody.speaking_rate_wpm, 100, 180)"
+      weight: 0.15
+      threshold_provenance: "tunable, not clinical"
+    - name: low_pause_ratio
+      source: "1 - normalize(pause_total_ratio, 0.0, 0.4)"
+      weight: 0.15
+      threshold_provenance: "tunable, not clinical; pause_total_ratio = pause_total_seconds / audio_duration_seconds"
+
+calmness:
+  components:
+    - name: pitch_stability
+      source: "1 - normalize(acoustic.pitch.std_hz, 10, 50)"
+      weight: 0.25
+      threshold_provenance: "tunable, not clinical"
+    - name: jitter_steadiness
+      source: "1 - normalize(acoustic.voice_quality.jitter_local, 0.005, 0.025)"
+      weight: 0.15
+      threshold_provenance: "Boone & McFarlane jitter normal/abnormal range"
+    - name: low_arousal
+      source: "1 - emotion.dimensional.arousal"
+      weight: 0.30
+      threshold_provenance: "audeering MSP-Podcast arousal dimension (inverted)"
+    - name: positive_valence_bias
+      source: "emotion.dimensional.valence"
+      weight: 0.10
+      threshold_provenance: "audeering MSP-Podcast valence dimension (0..1)"
+    - name: unhurried_pace
+      source: "1 - normalize(prosody.speaking_rate_wpm, 120, 200)"
+      weight: 0.20
+      threshold_provenance: "tunable, not clinical"
