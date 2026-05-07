@@ -55,10 +55,24 @@ class AcousticFeatures(BaseModel):
     spectral: SpectralFeatures
 
 
+class Word(BaseModel):
+    w: str
+    start: float
+    end: float
+    conf: float
+
+
+class Transcript(BaseModel):
+    engine: str
+    language: str
+    text: str
+    words: list[Word] = Field(default_factory=list)
+
+
 class AnalyzeResult(BaseModel):
     schema_version: str = "1.0"
     audio: AudioInfo
-    transcription: Optional[Any] = None
+    transcription: Optional[Transcript] = None
     acoustic: Optional[AcousticFeatures] = None
     prosody: Optional[Any] = None
     emotion: Optional[Any] = None
