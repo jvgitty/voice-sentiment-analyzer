@@ -31,8 +31,17 @@ def analyze(
     ),
 ) -> None:
     """Analyze a local audio file and emit the result JSON."""
+    if not audio_path.exists():
+        typer.echo(f"error: audio file not found: {audio_path}", err=True)
+        raise typer.Exit(code=1)
+
     pipeline = Pipeline()
-    result = asyncio.run(pipeline.analyze(audio_path))
+    try:
+        result = asyncio.run(pipeline.analyze(audio_path))
+    except Exception as exc:  # noqa: BLE001 - surface any failure to the user
+        typer.echo(f"error: failed to analyze {audio_path}: {exc}", err=True)
+        raise typer.Exit(code=1)
+
     payload = result.model_dump_json()
 
     if out is not None:

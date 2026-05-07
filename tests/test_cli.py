@@ -33,3 +33,22 @@ class TestCliAnalyze:
         assert payload["schema_version"] == "1.0"
         # When writing to file, stdout should not contain the JSON payload.
         assert "schema_version" not in result.stdout
+
+    def test_analyze_missing_file_exits_nonzero_with_stderr(
+        self, tmp_path: Path
+    ) -> None:
+        missing = tmp_path / "does_not_exist.wav"
+        result = runner.invoke(app, ["analyze", str(missing)])
+
+        assert result.exit_code != 0
+        # CliRunner exposes combined output via `result.output`; on newer
+        # Click versions stderr is also separated. Either should mention
+        # the bad path or that it doesn't exist.
+        combined = (result.output or "") + (
+            result.stderr if result.stderr_bytes is not None else ""
+        )
+        assert (
+            "does_not_exist.wav" in combined
+            or "not found" in combined.lower()
+            or "exist" in combined.lower()
+        )
