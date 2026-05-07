@@ -12,6 +12,7 @@ from vsa.features.acoustic import AcousticAnalyzer
 from vsa.features.emotion import EmotionAnalyzer
 from vsa.features.prosody import ProsodyAnalyzer
 from vsa.schema import AnalyzeResult, AudioInfo, ProcessingInfo
+from vsa.transcription import make_transcriber
 from vsa.windowed import WindowedAnalyzer
 
 if TYPE_CHECKING:
@@ -80,13 +81,13 @@ class Pipeline:
         windowed_analyzer: WindowedAnalyzer | None = None,
     ) -> None:
         self._acoustic = acoustic_analyzer or AcousticAnalyzer()
-        # Default: NeMo-backed Parakeet TDT. Constructed eagerly because
-        # ParakeetTranscriber is itself lazy — it does not load the model
-        # until the first transcribe() call.
+        # Default transcriber is whichever engine ``TRANSCRIBER_ENGINE``
+        # selects (Parakeet by default, faster-whisper when the env var
+        # is "whisper"). Both implementations are lazy — model load only
+        # happens on the first transcribe() call — so constructing the
+        # Pipeline at FastAPI startup stays cheap.
         if transcriber is None:
-            from vsa.transcription.parakeet import ParakeetTranscriber
-
-            transcriber = ParakeetTranscriber()
+            transcriber = make_transcriber()
         self._transcriber: "Transcriber" = transcriber
         # Default EmotionAnalyzer is also lazy: it only loads the two
         # wav2vec2 backbones on the first .analyze() call. Tests inject a

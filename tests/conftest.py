@@ -40,3 +40,27 @@ def fixture_wav_path(tmp_path: Path) -> Path:
 def fixture_wav_bytes(fixture_wav_path: Path) -> bytes:
     """Raw bytes of the synthesized fixture WAV."""
     return fixture_wav_path.read_bytes()
+
+
+# Session-scoped transcriber fixtures live in conftest so cross-module
+# tests (Slice 9 schema parity) can share them with the per-module smoke
+# tests in test_transcription.py / test_whisper.py without each module
+# warming its own copy of the model. Loading either model is expensive
+# (~12s for Parakeet's ~2GB checkpoint, ~10s for faster-whisper-small),
+# so a single shared instance per session keeps the suite fast.
+@pytest.fixture(scope="session")
+def parakeet_transcriber():
+    from vsa.transcription.parakeet import ParakeetTranscriber
+
+    transcriber = ParakeetTranscriber()
+    transcriber._load()
+    return transcriber
+
+
+@pytest.fixture(scope="session")
+def whisper_transcriber():
+    from vsa.transcription.whisper import FasterWhisperTranscriber
+
+    transcriber = FasterWhisperTranscriber()
+    transcriber._load()
+    return transcriber
