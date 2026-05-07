@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from vsa.schema import Transcript, Word
 
 
@@ -86,3 +88,37 @@ class TestFillerRate:
 
         features = ProsodyAnalyzer().analyze(transcript, audio_duration_sec=20.0)
         assert features.filler_rate == 4 / 20
+
+
+class TestPauseStatistics:
+    def test_pauses_above_threshold_are_counted_summed_and_averaged(self) -> None:
+        """A "pause" is a gap between consecutive words exceeding 0.3s.
+
+        Synthesized 5-word transcript with two qualifying gaps (0.5s
+        and 1.2s) plus two sub-threshold gaps (0.1s and 0.2s). Expect
+        pause_count == 2, total ≈ 1.7, mean ≈ 0.85."""
+        from vsa.features.prosody import ProsodyAnalyzer
+
+        # Word layout. Each word is 0.4s long.
+        # w0: 0.0 -> 0.4
+        # gap = 0.1s (sub-threshold)
+        # w1: 0.5 -> 0.9
+        # gap = 0.5s (PAUSE)
+        # w2: 1.4 -> 1.8
+        # gap = 0.2s (sub-threshold)
+        # w3: 2.0 -> 2.4
+        # gap = 1.2s (PAUSE)
+        # w4: 3.6 -> 4.0
+        words = [
+            ("a", 0.0, 0.4),
+            ("b", 0.5, 0.9),
+            ("c", 1.4, 1.8),
+            ("d", 2.0, 2.4),
+            ("e", 3.6, 4.0),
+        ]
+        transcript = _make_transcript(words)
+
+        features = ProsodyAnalyzer().analyze(transcript, audio_duration_sec=4.0)
+        assert features.pause_count == 2
+        assert features.pause_total_seconds == pytest.approx(1.7)
+        assert features.pause_mean_seconds == pytest.approx(0.85)

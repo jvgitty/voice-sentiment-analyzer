@@ -31,6 +31,11 @@ FILLER_WORDS: frozenset[str] = frozenset(
 class ProsodyAnalyzer:
     """Derive prosody features from a transcript and the audio duration."""
 
+    #: Minimum gap (in seconds) between consecutive words to count as a
+    #: "pause". Exposed as a class attribute so callers (and future env-var
+    #: wiring) can tune it without monkeypatching.
+    PAUSE_THRESHOLD_SECONDS: float = 0.3
+
     def analyze(
         self, transcript: Transcript, audio_duration_sec: float
     ) -> ProsodyFeatures:
@@ -46,15 +51,39 @@ class ProsodyAnalyzer:
             speaking_rate_wpm = 0.0
 
         filler_rate = self._filler_rate(transcript)
+        pause_count, pause_total, pause_mean = self._pause_stats(transcript)
 
         return ProsodyFeatures(
             speaking_rate_wpm=speaking_rate_wpm,
             speaking_rate_sps=0.0,
-            pause_count=0,
-            pause_total_seconds=0.0,
-            pause_mean_seconds=0.0,
+            pause_count=pause_count,
+            pause_total_seconds=pause_total,
+            pause_mean_seconds=pause_mean,
             filler_rate=filler_rate,
         )
+
+    def _pause_stats(
+        self, transcript: Transcript
+    ) -> tuple[int, float, float]:
+        """Count, sum, and average inter-word gaps above the threshold.
+
+        Returns ``(pause_count, pause_total_seconds, pause_mean_seconds)``.
+        Mean is 0.0 when there are no qualifying gaps (don't divide by zero).
+        """
+        words = transcript.words
+        if len(words) < 2:
+            return 0, 0.0, 0.0
+
+        pause_durations: list[float] = []
+        for prev, nxt in zip(words, words[1:]):
+            gap = nxt.start - prev.end
+            if gap > self.PAUSE_THRESHOLD_SECONDS:
+                pause_durations.append(gap)
+
+        pause_count = len(pause_durations)
+        pause_total = float(sum(pause_durations))
+        pause_mean = pause_total / pause_count if pause_count else 0.0
+        return pause_count, pause_total, pause_mean
 
     def _filler_rate(self, transcript: Transcript) -> float:
         """Fraction of words that match the filler lookup (case-insensitive).
