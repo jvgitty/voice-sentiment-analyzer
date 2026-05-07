@@ -26,7 +26,8 @@
       "Bash(.venv/Scripts/python.exe -m pytest tests/test_auth.py::TestCallbackSigner -x)",
       "Bash(.venv/Scripts/python.exe -m pytest tests/test_audio_fetcher.py -x)",
       "Bash(.venv/Scripts/python.exe -m pytest tests/test_audio_fetcher.py::TestAudioFetcher::test_rejects_wrong_content_type -x)",
-      "Bash(.venv/Scripts/python.exe -m pytest tests/test_audio_fetcher.py::TestAudioFetcher::test_cleans_up_tmp_file_on_mid_download_exception -x)"
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_audio_fetcher.py::TestAudioFetcher::test_cleans_up_tmp_file_on_mid_download_exception -x)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_pipeline.py -x)"
     ]
   }
 }
