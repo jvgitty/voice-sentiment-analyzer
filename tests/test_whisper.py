@@ -4,19 +4,12 @@ from pathlib import Path
 
 import pytest
 
+from vsa.schema import Transcript
 
-@pytest.fixture(scope="session")
-def whisper_transcriber():
-    """Session-scoped FasterWhisperTranscriber. Loading even the ``small``
-    model takes ~10s on first call (and downloads ~500MB the very first time
-    it ever runs on this machine), so we share one instance across smoke
-    tests."""
-    from vsa.transcription.whisper import FasterWhisperTranscriber
 
-    transcriber = FasterWhisperTranscriber()
-    # Force the lazy load once so subsequent test calls are warm.
-    transcriber._load()
-    return transcriber
+# whisper_transcriber and parakeet_transcriber are session-scoped fixtures
+# in conftest.py so the schema-parity tests below can share the warmed
+# instances with test_transcription.py.
 
 
 class TestFasterWhisperTranscriberConstruction:
@@ -79,3 +72,45 @@ class TestFasterWhisperTranscriberSmoke:
             assert isinstance(word.start, float)
             assert isinstance(word.end, float)
             assert isinstance(word.conf, float)
+
+
+class TestSchemaParity:
+    """Both engines must emit a ``Transcript`` that validates against the
+    same Pydantic model with the same field names and types. The downstream
+    pipeline (prosody, windows, scoring) operates on the schema, not on
+    engine-specific shapes, so any drift between Parakeet and Whisper would
+    break engine-swap as a feature.
+    """
+
+    def test_whisper_output_validates_against_transcript_schema(
+        self, whisper_transcriber, fixture_wav_path: Path
+    ) -> None:
+        whisper_result = whisper_transcriber.transcribe(fixture_wav_path)
+
+        # Round-trip through the Pydantic model: dumping then re-validating
+        # would catch any extra/missing field that .transcribe() emitted.
+        Transcript.model_validate(whisper_result.model_dump())
+
+    def test_parakeet_and_whisper_share_field_set(
+        self,
+        parakeet_transcriber,
+        whisper_transcriber,
+        fixture_wav_path: Path,
+    ) -> None:
+        """Engine swap is only safe if both engines populate exactly the
+        same set of fields. We compare the dumped key sets at both the
+        ``Transcript`` level and the ``Word`` level (when either engine
+        produced any words on the sine fixture)."""
+        from vsa.transcription.parakeet import ParakeetTranscriber  # noqa: F401  # import sanity
+
+        parakeet_result = parakeet_transcriber.transcribe(fixture_wav_path)
+        whisper_result = whisper_transcriber.transcribe(fixture_wav_path)
+
+        parakeet_keys = set(parakeet_result.model_dump().keys())
+        whisper_keys = set(whisper_result.model_dump().keys())
+        assert parakeet_keys == whisper_keys
+
+        # Every Word entry from either engine must carry the same shape.
+        expected_word_keys = {"w", "start", "end", "conf"}
+        for word in list(parakeet_result.words) + list(whisper_result.words):
+            assert set(word.model_dump().keys()) == expected_word_keys

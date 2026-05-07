@@ -6,16 +6,8 @@ from typing import Protocol, runtime_checkable
 import pytest
 
 
-@pytest.fixture(scope="session")
-def parakeet_transcriber():
-    """Session-scoped Parakeet transcriber. Loading the ~2GB model takes
-    several seconds, so we share one instance across smoke tests."""
-    from vsa.transcription.parakeet import ParakeetTranscriber
-
-    transcriber = ParakeetTranscriber()
-    # Force the lazy load once so subsequent test calls are warm.
-    transcriber._load()
-    return transcriber
+# parakeet_transcriber is a session-scoped fixture in conftest.py so the
+# Slice 9 schema-parity tests can share the same warmed instance.
 
 
 class TestTranscriberInterface:
