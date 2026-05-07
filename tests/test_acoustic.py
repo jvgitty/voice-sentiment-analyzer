@@ -63,3 +63,32 @@ class TestAcousticAnalyzer:
         features = analyzer.analyze(fixture_wav_path)
 
         assert 380.0 <= features.pitch.mean_hz <= 500.0
+
+    def test_voice_quality_features_are_non_negative_floats(
+        self, fixture_wav_path: Path
+    ) -> None:
+        """jitter, shimmer, hnr_db, voiced_unvoiced_ratio are >= 0.
+
+        Praat returns these as ratios / dB / fractions; for any non-pathological
+        signal they should be finite and non-negative. The 440 Hz fixture is
+        fully voiced and tonal, so HNR should be large and most frames should
+        be detected as voiced -- forces a real implementation, not stubs.
+        """
+        from vsa.features.acoustic import AcousticAnalyzer
+
+        analyzer = AcousticAnalyzer()
+        features = analyzer.analyze(fixture_wav_path)
+        vq = features.voice_quality
+
+        assert isinstance(vq.jitter_local, float)
+        assert isinstance(vq.shimmer_local, float)
+        assert isinstance(vq.hnr_db, float)
+        assert isinstance(vq.voiced_unvoiced_ratio, float)
+        assert vq.jitter_local >= 0.0
+        assert vq.shimmer_local >= 0.0
+        assert vq.hnr_db >= 0.0
+        assert vq.voiced_unvoiced_ratio >= 0.0
+        # Tonal pure sine: HNR should be substantially > 1 dB and most frames
+        # voiced. Force real implementation.
+        assert vq.hnr_db > 1.0
+        assert vq.voiced_unvoiced_ratio > 0.5

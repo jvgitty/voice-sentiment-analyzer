@@ -4,6 +4,7 @@ pitch, voice quality, spectral, and loudness features from audio."""
 from pathlib import Path
 
 import parselmouth
+from parselmouth.praat import call
 
 from vsa.schema import (
     AcousticFeatures,
@@ -17,11 +18,35 @@ from vsa.schema import (
 class AcousticAnalyzer:
     def analyze(self, audio_path: Path) -> AcousticFeatures:
         sound = parselmouth.Sound(str(audio_path))
+
         pitch_obj = sound.to_pitch()
-        # Praat returns 0 for unvoiced frames; filter those out for stats.
         f0 = pitch_obj.selected_array["frequency"]
         voiced = f0[f0 > 0.0]
         mean_hz = float(voiced.mean()) if voiced.size else 0.0
+        voiced_unvoiced_ratio = (
+            float(voiced.size) / float(f0.size) if f0.size else 0.0
+        )
+
+        # Voice quality via Praat's PointProcess (jitter, shimmer) and
+        # Harmonicity (HNR).
+        point_process = call(sound, "To PointProcess (periodic, cc)", 75, 500)
+        jitter_local = float(
+            call(point_process, "Get jitter (local)", 0, 0, 0.0001, 0.02, 1.3)
+        )
+        shimmer_local = float(
+            call(
+                [sound, point_process],
+                "Get shimmer (local)",
+                0,
+                0,
+                0.0001,
+                0.02,
+                1.3,
+                1.6,
+            )
+        )
+        harmonicity = sound.to_harmonicity()
+        hnr_db = float(call(harmonicity, "Get mean", 0, 0))
 
         return AcousticFeatures(
             pitch=PitchFeatures(
@@ -34,10 +59,10 @@ class AcousticAnalyzer:
             ),
             loudness=LoudnessFeatures(mean_db=0.0, std_db=0.0, rms_mean=0.0),
             voice_quality=VoiceQualityFeatures(
-                jitter_local=0.0,
-                shimmer_local=0.0,
-                hnr_db=0.0,
-                voiced_unvoiced_ratio=0.0,
+                jitter_local=jitter_local,
+                shimmer_local=shimmer_local,
+                hnr_db=hnr_db,
+                voiced_unvoiced_ratio=voiced_unvoiced_ratio,
             ),
             spectral=SpectralFeatures(
                 centroid_mean=0.0,
