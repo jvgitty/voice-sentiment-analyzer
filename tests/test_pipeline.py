@@ -227,3 +227,31 @@ class TestPipeline:
         assert result.emotion.categorical is not None
         assert result.emotion.categorical.label == "happy"
         assert result.processing.errors == []
+
+
+    @pytest.mark.asyncio
+    async def test_emotion_failure_sets_none_and_logs_error(
+        self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Partial-success contract: when the entire EmotionAnalyzer.analyze
+        raises (not just one inner model — that's handled inside the
+        analyzer), Pipeline.analyze sets result.emotion = None and appends
+        an entry to processing.errors. Other sections still populate."""
+        from vsa.features.emotion import EmotionAnalyzer
+
+        def boom(self: EmotionAnalyzer, audio_path: Path) -> None:
+            raise RuntimeError("synthetic emotion failure")
+
+        monkeypatch.setattr(EmotionAnalyzer, "analyze", boom)
+
+        pipeline = Pipeline(transcriber=_StubTranscriber())
+        result = await pipeline.analyze(fixture_wav_path)
+
+        assert result.emotion is None
+        assert any(
+            "emotion" in err.lower() and "synthetic" in err
+            for err in result.processing.errors
+        ), result.processing.errors
+        # Other sections continue running.
+        assert result.acoustic is not None
+        assert result.transcription is not None
