@@ -28,3 +28,13 @@ class TestCallbackSigner:
         signature = CallbackSigner.sign(body, secret)
         assert signature.startswith("sha256=")
         assert CallbackSigner.verify(body, secret, signature) is True
+
+    def test_verify_rejects_tampered_signature(self) -> None:
+        body = b'{"hello": "world"}'
+        secret = "shared-secret-1234567890"
+        signature = CallbackSigner.sign(body, secret)
+        # flip one hex char
+        tampered = signature[:-1] + ("0" if signature[-1] != "0" else "1")
+        assert CallbackSigner.verify(body, secret, tampered) is False
+        # also reject signature against tampered body
+        assert CallbackSigner.verify(b"different body", secret, signature) is False
