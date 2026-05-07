@@ -114,3 +114,54 @@ class TestSchemaParity:
         expected_word_keys = {"w", "start", "end", "conf"}
         for word in list(parakeet_result.words) + list(whisper_result.words):
             assert set(word.model_dump().keys()) == expected_word_keys
+
+
+class TestMakeTranscriberFactory:
+    """``make_transcriber()`` lives in ``vsa.transcription`` and reads the
+    ``TRANSCRIBER_ENGINE`` env var to pick between ParakeetTranscriber and
+    FasterWhisperTranscriber. This is the single switch the rest of the
+    code (Pipeline, FastAPI handler) uses to honour engine selection."""
+
+    def test_default_returns_parakeet(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No env var (or unset) means production-default Parakeet."""
+        from vsa.transcription import make_transcriber
+        from vsa.transcription.parakeet import ParakeetTranscriber
+
+        monkeypatch.delenv("TRANSCRIBER_ENGINE", raising=False)
+        transcriber = make_transcriber()
+        assert isinstance(transcriber, ParakeetTranscriber)
+
+    def test_explicit_parakeet_returns_parakeet(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from vsa.transcription import make_transcriber
+        from vsa.transcription.parakeet import ParakeetTranscriber
+
+        monkeypatch.setenv("TRANSCRIBER_ENGINE", "parakeet")
+        transcriber = make_transcriber()
+        assert isinstance(transcriber, ParakeetTranscriber)
+
+    def test_whisper_returns_faster_whisper(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from vsa.transcription import make_transcriber
+        from vsa.transcription.whisper import FasterWhisperTranscriber
+
+        monkeypatch.setenv("TRANSCRIBER_ENGINE", "whisper")
+        transcriber = make_transcriber()
+        assert isinstance(transcriber, FasterWhisperTranscriber)
+
+    def test_unknown_engine_raises_value_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Typos must surface loudly at construction time, not silently
+        fall back to a default."""
+        from vsa.transcription import make_transcriber
+
+        monkeypatch.setenv("TRANSCRIBER_ENGINE", "garbage")
+        with pytest.raises(ValueError) as exc_info:
+            make_transcriber()
+        # Error message names the bad value so the operator can spot it.
+        assert "garbage" in str(exc_info.value)
