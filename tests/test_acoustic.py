@@ -46,3 +46,20 @@ class TestAcousticFeaturesSchema:
         assert features.loudness.rms_mean == 0.5
         assert features.voice_quality.hnr_db == 15.0
         assert len(features.spectral.mfcc_means) == 13
+
+
+class TestAcousticAnalyzer:
+    def test_pitch_mean_hz_in_tolerance_band_for_440hz_fixture(
+        self, fixture_wav_path: Path
+    ) -> None:
+        """440 Hz pure sine fixture; parselmouth typically lands within +/- 20Hz.
+
+        Tolerance band [380, 500] is intentionally wide to absorb library
+        version drift.
+        """
+        from vsa.features.acoustic import AcousticAnalyzer
+
+        analyzer = AcousticAnalyzer()
+        features = analyzer.analyze(fixture_wav_path)
+
+        assert 380.0 <= features.pitch.mean_hz <= 500.0
