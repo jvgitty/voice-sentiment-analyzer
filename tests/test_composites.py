@@ -407,3 +407,29 @@ class TestPartialSuccessEmotionMissing:
         assert out.components["engagement"]["arousal"] is None
         assert out.components["calmness"]["low_arousal"] is None
         assert out.components["calmness"]["positive_valence_bias"] is None
+
+
+class TestPartialSuccessAllComponentsMissing:
+    """When a composite has zero scorable components (every required
+    input is None), the composite itself must be None and an explanatory
+    string is appended to the scorer's last_errors so the pipeline can
+    surface it in processing.errors."""
+
+    def test_engagement_is_none_when_all_inputs_missing(self) -> None:
+        scorer = CompositeScorer.from_yaml(COMPOSITES_YAML)
+        inputs = ScoreInputs(
+            acoustic=None,
+            prosody=None,
+            emotion=None,
+            audio_duration_seconds=0.0,
+        )
+        out = scorer.score(inputs)
+        assert out.engagement is None
+        # Every engagement component should be None in the breakdown.
+        assert all(
+            v is None for v in out.components["engagement"].values()
+        )
+        # An error mentioning engagement is appended.
+        assert any(
+            "engagement" in e for e in scorer.last_errors
+        ), scorer.last_errors
