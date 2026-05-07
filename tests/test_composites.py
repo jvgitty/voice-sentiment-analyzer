@@ -300,3 +300,32 @@ class TestComponentsBreakdown:
                 f"composite {composite_name}: sum of contributions {total} "
                 f"!= composite score {composite_score}"
             )
+
+
+class TestFormulasEcho:
+    """The output's _formulas dict must echo the YAML's source strings
+    verbatim. This is the proof that the YAML is the spec — anything the
+    hardcoded registry does is also published in the formulas list."""
+
+    def test_formulas_echoes_yaml_sources_for_every_composite(self) -> None:
+        import yaml as yaml_lib
+
+        with open(COMPOSITES_YAML, "r", encoding="utf-8") as f:
+            raw = yaml_lib.safe_load(f)
+
+        scorer = CompositeScorer.from_yaml(COMPOSITES_YAML)
+        inputs = ScoreInputs(
+            acoustic=_make_acoustic(),
+            prosody=_make_prosody(),
+            emotion=_make_emotion(),
+            audio_duration_seconds=10.0,
+        )
+        out = scorer.score(inputs)
+
+        for composite_name, body in raw.items():
+            expected_sources = [c["source"] for c in body["components"]]
+            assert composite_name in out.formulas
+            assert out.formulas[composite_name] == expected_sources, (
+                f"formulas mismatch for {composite_name}: "
+                f"yaml={expected_sources!r} echo={out.formulas[composite_name]!r}"
+            )
