@@ -47,3 +47,26 @@ class TestPipeline:
         # Sanity: the wired-in AcousticFeatures should reflect the 440 Hz
         # fixture, not stub zeros.
         assert 380.0 <= result.acoustic.pitch.mean_hz <= 500.0
+
+
+    @pytest.mark.asyncio
+    async def test_acoustic_failure_sets_none_and_logs_error(
+        self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Partial-success contract: a flaky AcousticAnalyzer must not 500
+        the whole pipeline. The section becomes None and an entry is appended
+        to processing.errors."""
+        from vsa.features.acoustic import AcousticAnalyzer
+
+        def boom(self, audio_path: Path) -> None:
+            raise RuntimeError("synthetic acoustic failure")
+
+        monkeypatch.setattr(AcousticAnalyzer, "analyze", boom)
+
+        pipeline = Pipeline()
+        result = await pipeline.analyze(fixture_wav_path)
+
+        assert result.acoustic is None
+        assert len(result.processing.errors) == 1
+        assert "acoustic" in result.processing.errors[0].lower()
+        assert "synthetic" in result.processing.errors[0]
