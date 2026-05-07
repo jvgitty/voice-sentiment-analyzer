@@ -283,6 +283,47 @@ class TestPipeline:
 
 
     @pytest.mark.asyncio
+    async def test_live_parakeet_transcriber_pipeline_populates_prosody(
+        self, fixture_wav_path: Path
+    ) -> None:
+        """End-to-end run with the real ParakeetTranscriber to de-risk
+        Slice 3's word-timestamp parsing.
+
+        The 1-second 440 Hz sine fixture transcribes to gibberish at best
+        (often an empty word list). We assert only:
+          1. Pipeline.analyze does not crash on the real transcribe path.
+          2. result.prosody populates (i.e. ProsodyFeatures, not None) —
+             the transcript shape produced by Slice 3 is consumable by
+             ProsodyAnalyzer without raising.
+          3. Numeric fields are sane (non-negative, no NaN).
+
+        If the fixture ever produces *non-empty* words and the prosody
+        section gets weird (e.g. negative speaking rate, NaN pauses), that
+        signals Slice 3's word-timestamp key-handling needs review."""
+        from vsa.transcription.parakeet import ParakeetTranscriber
+        from vsa.schema import ProsodyFeatures
+
+        pipeline = Pipeline(
+            transcriber=ParakeetTranscriber(),
+            emotion_analyzer=_StubEmotionAnalyzer(),
+        )
+        result = await pipeline.analyze(fixture_wav_path)
+
+        # No crash, prosody populated.
+        assert isinstance(result.prosody, ProsodyFeatures)
+        assert result.transcription is not None
+
+        # Sanity ranges. None of these should ever go negative regardless
+        # of what the real model emitted.
+        assert result.prosody.speaking_rate_wpm >= 0.0
+        assert result.prosody.speaking_rate_sps >= 0.0
+        assert result.prosody.pause_count >= 0
+        assert result.prosody.pause_total_seconds >= 0.0
+        assert result.prosody.pause_mean_seconds >= 0.0
+        assert 0.0 <= result.prosody.filler_rate <= 1.0
+
+
+    @pytest.mark.asyncio
     async def test_emotion_failure_sets_none_and_logs_error(
         self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
