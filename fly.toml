@@ -1,0 +1,67 @@
+# fly.toml — Voice Sentiment Analyzer deployment config for Fly.io.
+#
+# This config implements the architecture from the PRD (#1):
+#
+#   - Pattern alpha: long-held HTTP connections. Each /analyze request
+#     stays in flight on the Machine until the analyzer fires its webhook,
+#     so Fly's proxy treats the Machine as busy and will not auto-suspend
+#     it mid-job. The caller (e.g. a Supabase edge function) is
+#     fire-and-forget — it can disconnect after its own short timeout
+#     while the analyzer keeps running.
+#   - Scale-to-zero: min_machines_running = 0 with auto_stop_machines =
+#     "suspend". The Machine sleeps when idle and wakes on the next
+#     request. Cold-start latency is acceptable because the caller is
+#     async (webhook-based) and ML jobs take many seconds anyway.
+#   - Burst-to-3 concurrent Machines: hard_limit/soft_limit = 1 forces
+#     the proxy to spin up another Machine for every concurrent request,
+#     up to max_machines_running = 3. Three voice notes arriving in 10s
+#     do not 504 waiting for a busy Machine.
+#
+# Notes for the operator running `fly launch`:
+#   - You can override the app name on the command line with
+#     `fly launch --name <your-name>` (must be globally unique on Fly).
+#   - You can change the primary region to anything from `fly platform
+#     regions`. iad (Ashburn, Virginia) is a sensible US East default.
+#   - The Docker image is built from the existing Dockerfile at the repo
+#     root — no [build] section needed.
+
+app = "voice-sentiment-analyzer"
+primary_region = "iad"  # Ashburn, VA. Change to e.g. "lhr", "fra", "sjc" as needed.
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+  max_machines_running = 3
+  processes = ["app"]
+
+  # One in-flight request per Machine. Pattern alpha relies on this:
+  # if a second request lands while the Machine is busy, Fly's proxy
+  # routes it to a new Machine (cold-starting one if needed) rather
+  # than queueing behind the in-flight job.
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 1
+    soft_limit = 1
+
+[[vm]]
+  # 2 shared CPUs + 4 GB RAM is a reasonable starting point for the
+  # loaded ML stack (NeMo Parakeet + audeering wav2vec2 + SpeechBrain
+  # IEMOCAP all in memory). Tune up if you see OOM kills in the logs;
+  # tune down if you only ever run short clips and want to save money.
+  cpu_kind = "shared"
+  cpus = 2
+  memory = "4gb"
+
+[deploy]
+  # Roll back to the previous release on failed health checks rather
+  # than leaving the app in a broken state.
+  strategy = "rolling"
+
+[experimental]
+  auto_rollback = true
