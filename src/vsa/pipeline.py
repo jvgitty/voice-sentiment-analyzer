@@ -19,12 +19,31 @@ if TYPE_CHECKING:
     from vsa.transcription.base import Transcriber
 
 
-# composites.yaml lives at the repo root; it's the editable spec for the
-# three composite formulas. Resolved relative to this file so the test
-# suite (which runs with cwd=tests/...) finds it without env tricks.
-_COMPOSITES_YAML_PATH = (
-    Path(__file__).resolve().parent.parent.parent / "composites.yaml"
-)
+# composites.yaml is the editable spec for the three composite formulas.
+# Its location depends on how vsa is installed:
+#   - Dev checkout:  /repo/composites.yaml  — sibling of /repo/src/vsa/.
+#   - Docker / Fly:  /app/composites.yaml   — copied in by the Dockerfile.
+#   - pip install:   tries /app/, falls back to the dev-checkout layout
+#                    (which doesn't apply but is tried last for safety).
+# An override env var lets advanced operators point at a custom location.
+def _resolve_composites_yaml_path() -> Path:
+    override = os.environ.get("COMPOSITES_YAML_PATH")
+    if override:
+        return Path(override)
+    candidates = [
+        Path("/app/composites.yaml"),  # Docker / Fly convention.
+        Path(__file__).resolve().parent.parent.parent / "composites.yaml",  # dev checkout.
+        Path.cwd() / "composites.yaml",  # arbitrary cwd fallback.
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    # Fall back to the first candidate; CompositeScorer.from_yaml will
+    # raise a clear FileNotFoundError if it really isn't there.
+    return candidates[0]
+
+
+_COMPOSITES_YAML_PATH = _resolve_composites_yaml_path()
 
 
 def _energy_steadiness_from_windows(windows) -> float | None:
