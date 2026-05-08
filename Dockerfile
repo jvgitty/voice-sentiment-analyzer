@@ -24,46 +24,28 @@ COPY src/ ./src/
 
 RUN pip install --no-cache-dir .
 
-# Pre-download model weights into the image so cold starts on Fly don't
-# pay several GB of egress, and so air-gapped containers can still serve
-# traffic. Everything lands under HF_HOME's hub cache (/opt/hf-cache),
-# which both NeMo, transformers, and SpeechBrain look at at runtime.
+# Lazy-download models at runtime instead of baking them into the image.
 #
-# We use huggingface_hub.snapshot_download (download files only) rather
-# than NeMo's from_pretrained (download + instantiate). Instantiating
-# Parakeet 0.6B at build time spikes RAM to ~5 GB and OOM-kills small
-# remote builders (we hit this on Fly's default Depot builder, exit 137).
-# The runtime from_pretrained call still finds these cached files via
-# HF Hub's cache lookup, so first-request latency is unchanged.
+# The PRD originally called for baking model weights to keep cold starts
+# fast. We tried, but Fly Machines cap rootfs at 8 GB uncompressed across
+# every VM size, and the three baked models (~4 GB together) push the
+# image over that limit ("Not enough space to unpack image").
+#
+# The compromise: ship only the dependencies in the image (already ~3 GB
+# from torch/NeMo/transformers/speechbrain), and let the runtime first-
+# request pull each model on demand. This is one-time-per-Machine cost:
+# Fly's local disk persists across auto-suspend cycles, so models are
+# only re-fetched if the Machine is destroyed and recreated (e.g. on
+# redeploy or region change).
+#
+# First-request latency after a fresh deploy: roughly 3-5 minutes total
+# while Parakeet (~2 GB), audeering wav2vec2 (~1 GB), and SpeechBrain
+# IEMOCAP (~1 GB) download in sequence on demand. Acceptable for the
+# webhook-callback architecture (the caller is fire-and-forget anyway).
+#
+# HF_HOME stays set so all three libraries cache to the same well-known
+# location, surviving suspend/resume on the Machine's local disk.
 ENV HF_HOME=/opt/hf-cache
-RUN python -c "from huggingface_hub import snapshot_download; \
-    snapshot_download('nvidia/parakeet-tdt-0.6b-v2')"
-
-# Slice 5: bake both emotion-recognition models into the image.
-#
-# Dimensional model (audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim):
-# pulled via huggingface_hub.snapshot_download — the model uses a custom
-# Wav2Vec2 regression head subclass at runtime (see vsa.features.emotion),
-# so we just need the weights & processor on disk, not loaded into a
-# specific architecture.
-#
-# Categorical model (speechbrain/emotion-recognition-wav2vec2-IEMOCAP):
-# pulled via SpeechBrain's foreign_class. SpeechBrain copies the chosen
-# files into a savedir under HF_HOME so the runtime classifier picks them
-# up without re-downloading. We force LocalStrategy.COPY because the
-# default symlink strategy fails on filesystems without symlink support.
-RUN python -c "from huggingface_hub import snapshot_download; \
-    snapshot_download('audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim')"
-
-RUN python -c "import vsa.features.emotion as e; \
-    e._patch_speechbrain_lazy_imports(); \
-    from speechbrain.inference.interfaces import foreign_class; \
-    from speechbrain.utils.fetching import LocalStrategy; \
-    foreign_class(source='speechbrain/emotion-recognition-wav2vec2-IEMOCAP', \
-        pymodule_file='custom_interface.py', \
-        classname='CustomEncoderWav2vec2Classifier', \
-        savedir='/opt/hf-cache/hub/speechbrain-iemocap', \
-        local_strategy=LocalStrategy.COPY)"
 
 EXPOSE 8080
 
