@@ -28,9 +28,16 @@ RUN pip install --no-cache-dir .
 # pay several GB of egress, and so air-gapped containers can still serve
 # traffic. Everything lands under HF_HOME's hub cache (/opt/hf-cache),
 # which both NeMo, transformers, and SpeechBrain look at at runtime.
+#
+# We use huggingface_hub.snapshot_download (download files only) rather
+# than NeMo's from_pretrained (download + instantiate). Instantiating
+# Parakeet 0.6B at build time spikes RAM to ~5 GB and OOM-kills small
+# remote builders (we hit this on Fly's default Depot builder, exit 137).
+# The runtime from_pretrained call still finds these cached files via
+# HF Hub's cache lookup, so first-request latency is unchanged.
 ENV HF_HOME=/opt/hf-cache
-RUN python -c "import nemo.collections.asr as nemo_asr; \
-    nemo_asr.models.ASRModel.from_pretrained('nvidia/parakeet-tdt-0.6b-v2')"
+RUN python -c "from huggingface_hub import snapshot_download; \
+    snapshot_download('nvidia/parakeet-tdt-0.6b-v2')"
 
 # Slice 5: bake both emotion-recognition models into the image.
 #
