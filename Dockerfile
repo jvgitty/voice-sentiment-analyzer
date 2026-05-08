@@ -21,6 +21,11 @@ RUN apt-get update \
 
 COPY pyproject.toml ./
 COPY src/ ./src/
+# composites.yaml is the editable spec for confidence/engagement/calmness
+# formulas (Slice 6). Pipeline.__init__ loads it at request time via
+# CompositeScorer.from_yaml; without it in the image, every request 500s
+# at pipeline construction.
+COPY composites.yaml ./
 
 RUN pip install --no-cache-dir .
 
