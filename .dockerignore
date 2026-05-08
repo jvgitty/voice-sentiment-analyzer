@@ -1,0 +1,79 @@
+# flyctl launch added from .gitignore
+# Python
+**/__pycache__
+**/*.py[cod]
+**/*$py.class
+**/*.so
+**/.Python
+**/.venv
+**/venv
+**/env
+**/.eggs
+**/*.egg-info
+**/*.egg
+**/build
+**/dist
+
+# Environment
+**/.env
+**/.env.local
+**/*.env
+
+# IDE
+**/.vscode
+**/.idea
+**/*.swp
+**/*.swo
+
+# OS
+**/.DS_Store
+**/Thumbs.db
+
+# Audio (do not commit voice notes)
+**/*.wav
+**/*.mp3
+**/*.flac
+**/*.m4a
+**/*.ogg
+**/*.opus
+
+# ML models (baked into Docker image, not committed)
+**/models
+**/wav2vec2_checkpoints
+**/*.bin
+**/*.safetensors
+**/*.onnx
+**/*.pt
+**/*.ckpt
+
+# Logs and temp
+**/*.log
+**/.pytest_cache
+**/.coverage
+**/htmlcov
+
+# Claude Code local settings (contains user-specific permission grants)
+**/.claude
+
+# flyctl launch added from .pytest_cache/.gitignore
+# Created by pytest automatically.
+.pytest_cache/**/*
+
+# flyctl launch added from .venv/.gitignore
+# Created by venv; see https://docs.python.org/3/library/venv.html
+.venv/**/*
+
+# flyctl launch added from .venv/Lib/site-packages/.gitignore
+.venv/Lib/site-packages/**/*
+
+# flyctl launch added from .venv/Lib/site-packages/hydra/grammar/.gitignore
+.venv/Lib/site-packages/hydra/grammar/**/OverrideLexer.tokens
+
+# flyctl launch added from .venv/Lib/site-packages/hydra/grammar/gen/.gitignore
+.venv/Lib/site-packages/hydra/grammar/gen/**/*
+!.venv/Lib/site-packages/hydra/grammar/gen/**/.gitignore
+
+
+# flyctl launch added from .venv/Lib/site-packages/hydra/test_utils/configs/missing_init_py/.gitignore
+!.venv/Lib/site-packages/hydra/test_utils/configs/missing_init_py/**/.gitignore
+fly.toml
