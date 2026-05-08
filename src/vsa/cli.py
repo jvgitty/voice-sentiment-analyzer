@@ -78,3 +78,10 @@ def analyze(
         out.write_text(payload)
     else:
         typer.echo(payload)
+
+
+# Allow ``python -m vsa.cli ...`` in addition to the ``vsa`` console script
+# entry point. Without this block, runpy imports this module but never invokes
+# the Typer app, leading to silent zero-output exits.
+if __name__ == "__main__":
+    app()
