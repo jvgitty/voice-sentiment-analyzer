@@ -97,6 +97,31 @@ def _slice_to_wav(
     return dst_path
 
 
+def _trim_malloc() -> None:
+    """Force glibc's malloc to return free pages to the OS.
+
+    Without this, RSS grows monotonically across ``model.transcribe()``
+    calls even when Python correctly drops every reference: glibc keeps
+    the freed pages on its own free list rather than ``munmap``-ing
+    them, and ``gc.collect()`` only releases to glibc's allocator, not
+    to the kernel. After ~10 sequential 60s-chunk transcribe calls
+    that's enough to OOM an 8 GB Fly machine even though no individual
+    chunk peaks anywhere near the limit.
+
+    ``malloc_trim(0)`` is a glibc-specific syscall; it's a best-effort
+    no-op on musl (Alpine), Windows, and macOS. We swallow the load
+    error there so dev environments without glibc still work.
+    """
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):
+        # No glibc on this platform (musl, Windows, macOS dev) — the
+        # accumulation pattern this guards against is glibc-specific
+        # anyway, so a no-op here is correct.
+        pass
+
+
 def _hypotheses_to_text_and_words(
     hypotheses: Any, offset_sec: float
 ) -> tuple[str, list[Word]]:
@@ -203,9 +228,13 @@ class ParakeetTranscriber:
 
                 # Drop the chunk file as soon as it's been consumed and
                 # nudge the GC so encoder activations from this call
-                # don't accumulate into the next chunk's peak.
+                # don't accumulate into the next chunk's peak. Then
+                # tell glibc to give the freed pages back to the kernel
+                # — without that, RSS grows ~600 MB per chunk even with
+                # gc.collect() and OOMs around chunk 11 on 8 GB Fly.
                 chunk_path.unlink(missing_ok=True)
                 gc.collect()
+                _trim_malloc()
 
                 start_sec += chunk_sec
                 chunk_idx += 1

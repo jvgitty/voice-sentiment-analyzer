@@ -31,6 +31,16 @@ primary_region = "iad"  # Ashburn, VA. Change to e.g. "lhr", "fra", "sjc" as nee
 [build]
   dockerfile = "Dockerfile"
 
+[env]
+  # Cap glibc's per-thread malloc arenas. Default is 8 * cpu_count,
+  # which on shared-cpu-4x means 32 separate arenas — each one keeps
+  # its own free list, which fragments memory and inflates RSS across
+  # many model.transcribe() calls. MALLOC_ARENA_MAX=2 collapses that
+  # to two arenas, dramatically reducing fragmentation. Pairs with
+  # the explicit malloc_trim(0) call between transcribe chunks in
+  # ParakeetTranscriber. Common pattern in long-running ML workers.
+  MALLOC_ARENA_MAX = "2"
+
 [http_service]
   internal_port = 8080
   force_https = true
