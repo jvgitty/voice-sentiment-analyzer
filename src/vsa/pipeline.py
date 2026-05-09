@@ -1,5 +1,6 @@
 """Orchestrator: read audio metadata, run feature analyzers, assemble result."""
 
+import gc
 import os
 import wave
 from datetime import datetime, timezone
@@ -75,6 +76,22 @@ def _energy_steadiness_from_windows(windows) -> float | None:
     std = var ** 0.5
     cov = std / mean
     return max(0.0, min(1.0, 1.0 - cov))
+
+
+def _evict_between_phases() -> bool:
+    """Whether Pipeline should drop heavy models the moment they stop
+    being needed for the rest of the request. Default: enabled.
+
+    Set ``VSA_EVICT_BETWEEN_PHASES=0`` (or "false"/"no") to keep the
+    lazy caches resident across the full request — useful when
+    profiling or benchmarking many requests in a single warm process,
+    where the per-request reload cost dominates the memory savings.
+    On Fly.io with auto-suspend, the next request after a cold-start
+    reloads from scratch anyway, so eviction is essentially free in
+    production.
+    """
+    raw = os.environ.get("VSA_EVICT_BETWEEN_PHASES", "1")
+    return raw.strip().lower() not in ("0", "false", "no", "")
 
 
 def _default_window_seconds() -> float:
@@ -172,6 +189,17 @@ class Pipeline:
             transcription = None
             errors.append(f"transcription failed: {e}")
 
+        # The transcriber model (Parakeet ~2 GB, Whisper variable) is not
+        # used by any downstream phase. Drop it now so its weights are
+        # collectable before the emotion backbones load — this is the
+        # single biggest win against the OOMs observed during the v0.1.1
+        # smoke test. Stub transcribers without a release() are skipped.
+        if _evict_between_phases():
+            release = getattr(self._transcriber, "release", None)
+            if callable(release):
+                release()
+                gc.collect()
+
         try:
             acoustic = self._acoustic.analyze(audio_path)
         except Exception as e:  # noqa: BLE001 -- partial-success contract
@@ -189,6 +217,18 @@ class Pipeline:
         except Exception as e:  # noqa: BLE001 -- partial-success contract
             emotion = None
             errors.append(f"emotion analysis failed: {e}")
+
+        # The categorical (SpeechBrain IEMOCAP) backbone is dead weight
+        # from this point on: WindowedAnalyzer skips categorical inference
+        # per window (see vsa.windowed module docstring), and nothing else
+        # downstream consumes it. Drop it so the per-window dimensional
+        # forward passes have ~1.3 GB more headroom. Stub analyzers
+        # without a release_categorical() are skipped.
+        if _evict_between_phases():
+            release_cat = getattr(self._emotion, "release_categorical", None)
+            if callable(release_cat):
+                release_cat()
+                gc.collect()
 
         # Prosody runs last among the feature analyzers so its failure
         # cannot take down acoustic/emotion. It also depends on the
