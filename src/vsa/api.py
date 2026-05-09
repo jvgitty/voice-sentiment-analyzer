@@ -28,6 +28,12 @@ _ALLOWED_AUDIO_TYPES = {
     "audio/m4a",
     "audio/aac",
     "audio/webm",
+    # "x-" prefixed variants. Older servers (and Supabase Storage in
+    # particular for m4a) emit these instead of the RFC-registered
+    # forms above. Same audio data, different label.
+    "audio/x-m4a",
+    "audio/x-aac",
+    "audio/x-mpeg",
 }
 _DEFAULT_MAX_AUDIO_BYTES = 50 * 1024 * 1024  # 50MB
 
