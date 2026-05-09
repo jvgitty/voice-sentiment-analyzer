@@ -50,13 +50,23 @@ primary_region = "iad"  # Ashburn, VA. Change to e.g. "lhr", "fra", "sjc" as nee
     soft_limit = 1
 
 [[vm]]
-  # 2 shared CPUs + 4 GB RAM is a reasonable starting point for the
-  # loaded ML stack (NeMo Parakeet + audeering wav2vec2 + SpeechBrain
-  # IEMOCAP all in memory). Tune up if you see OOM kills in the logs;
-  # tune down if you only ever run short clips and want to save money.
+  # 2 shared CPUs + 8 GB RAM. Bumped from the original 4 GB because
+  # production hit OOM during the v0.1.1 smoke test: loading NeMo
+  # Parakeet + audeering wav2vec2 + SpeechBrain IEMOCAP into a single
+  # Python process peaks at ~5-6 GB resident on first request, which
+  # 4 GB couldn't hold. The kernel SIGKILL'd the whole machine and
+  # Fly auto-restarted it, losing the in-flight job.
+  #
+  # 8 GB has comfortable headroom for the loaded ML stack plus the
+  # per-window emotion re-runs the WindowedAnalyzer fires. Auto-suspend
+  # means we only pay for memory while the machine is awake; idle cost
+  # remains near zero.
+  #
+  # Tune higher if you ever see OOM again in the logs; tune down if
+  # you only ever process short clips and want to save money.
   cpu_kind = "shared"
   cpus = 2
-  memory = "4gb"
+  memory = "8gb"
 
 [deploy]
   # Roll back to the previous release on failed health checks rather
