@@ -50,33 +50,35 @@ primary_region = "iad"  # Ashburn, VA. Change to e.g. "lhr", "fra", "sjc" as nee
     soft_limit = 1
 
 [[vm]]
-  # 4 shared CPUs + 16 GB RAM.
+  # 4 shared CPUs + 8 GB RAM.
   #
-  # Memory bumped twice during the v0.1.1 smoke testing:
+  # Memory history during v0.1.1 smoke testing:
   #   * 4 GB OOM'd during model load (kernel SIGKILL'd the machine).
-  #   * 8 GB OOM'd at 7.89 GB resident — we were 1 GB short.
-  #   * 16 GB is the comfortable size for the actual peak.
-  #
-  # Real measured peak: ~7.9 GB resident with NeMo Parakeet + audeering
-  # wav2vec2 + SpeechBrain IEMOCAP all loaded in one Python process,
-  # plus per-window emotion re-runs from the WindowedAnalyzer.
-  # 16 GB gives ~8 GB headroom for spikes.
+  #   * 8 GB OOM'd at 7.89 GB resident — pipeline kept Parakeet +
+  #     SpeechBrain IEMOCAP loaded the whole request even though
+  #     neither was used during the windowed pass.
+  #   * Bumped to 16 GB briefly, but Fly's shared-cpu-4x plan caps at
+  #     8192 MiB. Going higher would require shared-cpu-8x (double
+  #     billing) or performance-Nx.
+  #   * PR #33 evicts both unused caches between phases (~3 GB
+  #     reclaimed before the heavy windowed pass), bringing peak
+  #     comfortably back under 8 GB without paying for more CPUs.
   #
   # 4 CPUs (vs 2) lets torch / numpy BLAS / Parakeet inference fan out,
   # noticeably reducing wall-clock per request. Since billing is per
   # machine-second-awake, faster requests mean lower overall cost
   # despite the higher hourly rate.
   #
-  # Auto-suspend keeps idle cost near zero. The 16 GB allocation is
+  # Auto-suspend keeps idle cost near zero. The 8 GB allocation is
   # only billed while the machine is awake processing a job.
   #
-  # Tune higher if OOM ever recurs (peak should not move much from
-  # 8 GB unless we add another model); tune lower only if we ever
-  # refactor the analyzer to load/unload models per phase rather
-  # than keeping all three resident simultaneously.
+  # Tune higher (and switch to shared-cpu-8x or performance-Nx) only if
+  # OOM recurs after PR #33's eviction landed. Tune lower only if we
+  # ever rework the windowed pass to also stream the dimensional model
+  # in/out per window.
   cpu_kind = "shared"
   cpus = 4
-  memory = "16gb"
+  memory = "8gb"
 
 [deploy]
   # Roll back to the previous release on failed health checks rather
