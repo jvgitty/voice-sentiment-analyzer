@@ -43,6 +43,15 @@ class ParakeetTranscriber:
             self._model = nemo_asr.models.ASRModel.from_pretrained(MODEL_NAME)
         return self._model
 
+    def release(self) -> None:
+        """Drop the loaded NeMo model so its weights become eligible for
+        GC. Used by Pipeline to reclaim ~2 GB of resident memory after the
+        transcription phase, since downstream analyzers do not call back
+        into the transcriber. The next :meth:`transcribe` call reloads
+        lazily.
+        """
+        self._model = None
+
     def transcribe(self, audio_path: Path) -> Transcript:
         model = self._load()
         hypotheses = model.transcribe([str(audio_path)], timestamps=True)

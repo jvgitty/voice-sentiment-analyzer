@@ -58,6 +58,13 @@ class FasterWhisperTranscriber:
             self._model = WhisperModel(self._model_size, device="cpu")
         return self._model
 
+    def release(self) -> None:
+        """Drop the loaded Whisper model so its weights become eligible
+        for GC. Mirrors :meth:`ParakeetTranscriber.release`; the next
+        :meth:`transcribe` call reloads lazily.
+        """
+        self._model = None
+
     def transcribe(self, audio_path: Path) -> Transcript:
         model = self._load()
         # ``word_timestamps=True`` makes faster-whisper attach per-segment

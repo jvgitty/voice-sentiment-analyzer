@@ -295,6 +295,20 @@ class EmotionAnalyzer:
             scores=scores,
         )
 
+    # -- memory-eviction helpers ------------------------------------------
+
+    def release_categorical(self) -> None:
+        """Drop the loaded SpeechBrain IEMOCAP classifier so its wav2vec2
+        backbone (~1.3 GB) becomes eligible for GC.
+
+        The windowed pass intentionally skips the categorical model (see
+        :class:`vsa.windowed.WindowedAnalyzer`), so once whole-audio
+        emotion has run, the classifier is dead weight for the rest of
+        the request. The next :meth:`_run_categorical` call reloads
+        lazily.
+        """
+        self._categorical_classifier = None
+
     # -- public API --------------------------------------------------------
 
     def analyze(self, audio_path: Path) -> EmotionResult:

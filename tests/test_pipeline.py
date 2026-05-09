@@ -448,6 +448,78 @@ class TestPipeline:
 
 
     @pytest.mark.asyncio
+    async def test_evict_between_phases_releases_transcriber_and_categorical(
+        self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Memory-eviction contract: by default Pipeline.analyze must call
+        ``release()`` on the transcriber after the transcription phase and
+        ``release_categorical()`` on the emotion analyzer after the
+        whole-audio emotion phase. Without this, the OOMs observed during
+        v0.1.1 smoke testing recur on machines smaller than 16 GB."""
+        monkeypatch.delenv("VSA_EVICT_BETWEEN_PHASES", raising=False)
+
+        release_calls: list[str] = []
+
+        class RecordingTranscriber(_StubTranscriber):
+            def release(self) -> None:
+                release_calls.append("transcriber")
+
+        class RecordingEmotion(_StubEmotionAnalyzer):
+            def release_categorical(self) -> None:
+                release_calls.append("categorical")
+
+        pipeline = Pipeline(
+            transcriber=RecordingTranscriber(),
+            emotion_analyzer=RecordingEmotion(),
+        )
+        await pipeline.analyze(fixture_wav_path)
+
+        assert release_calls == ["transcriber", "categorical"]
+
+    @pytest.mark.asyncio
+    async def test_evict_between_phases_can_be_disabled_via_env(
+        self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``VSA_EVICT_BETWEEN_PHASES=0`` opts out of the eviction. Useful
+        for benchmarking many requests in a single warm process, where
+        the per-request reload cost dominates the memory savings."""
+        monkeypatch.setenv("VSA_EVICT_BETWEEN_PHASES", "0")
+
+        release_calls: list[str] = []
+
+        class RecordingTranscriber(_StubTranscriber):
+            def release(self) -> None:
+                release_calls.append("transcriber")
+
+        class RecordingEmotion(_StubEmotionAnalyzer):
+            def release_categorical(self) -> None:
+                release_calls.append("categorical")
+
+        pipeline = Pipeline(
+            transcriber=RecordingTranscriber(),
+            emotion_analyzer=RecordingEmotion(),
+        )
+        await pipeline.analyze(fixture_wav_path)
+
+        assert release_calls == []
+
+    @pytest.mark.asyncio
+    async def test_evict_between_phases_skips_stubs_without_release(
+        self, fixture_wav_path: Path
+    ) -> None:
+        """Eviction is opt-in per analyzer: stubs without release()/
+        release_categorical() must not crash the pipeline. This keeps
+        the existing test suite (and any external callers using the
+        Transcriber Protocol's narrow contract) working."""
+        pipeline = Pipeline(
+            transcriber=_StubTranscriber(),
+            emotion_analyzer=_StubEmotionAnalyzer(),
+        )
+        result = await pipeline.analyze(fixture_wav_path)
+
+        assert result.processing.errors == []
+
+    @pytest.mark.asyncio
     async def test_emotion_failure_sets_none_and_logs_error(
         self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
