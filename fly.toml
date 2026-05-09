@@ -50,22 +50,27 @@ primary_region = "iad"  # Ashburn, VA. Change to e.g. "lhr", "fra", "sjc" as nee
     soft_limit = 1
 
 [[vm]]
-  # 2 shared CPUs + 8 GB RAM. Bumped from the original 4 GB because
-  # production hit OOM during the v0.1.1 smoke test: loading NeMo
-  # Parakeet + audeering wav2vec2 + SpeechBrain IEMOCAP into a single
-  # Python process peaks at ~5-6 GB resident on first request, which
-  # 4 GB couldn't hold. The kernel SIGKILL'd the whole machine and
-  # Fly auto-restarted it, losing the in-flight job.
+  # 4 shared CPUs + 8 GB RAM. Both bumped from the original 2 CPUs /
+  # 4 GB after production OOM during the v0.1.1 smoke test: loading
+  # NeMo Parakeet + audeering wav2vec2 + SpeechBrain IEMOCAP into a
+  # single Python process peaks at ~5-6 GB resident on first request,
+  # which 4 GB couldn't hold. The kernel SIGKILL'd the whole machine
+  # and Fly auto-restarted it, losing the in-flight job.
   #
   # 8 GB has comfortable headroom for the loaded ML stack plus the
   # per-window emotion re-runs the WindowedAnalyzer fires. Auto-suspend
   # means we only pay for memory while the machine is awake; idle cost
   # remains near zero.
   #
-  # Tune higher if you ever see OOM again in the logs; tune down if
+  # 4 CPUs (vs 2) lets torch / numpy BLAS / Parakeet inference fan out,
+  # noticeably reducing wall-clock time per request. Since cost is
+  # billed per machine-second-awake, faster requests mean lower overall
+  # cost despite the higher hourly rate.
+  #
+  # Tune higher if you ever see OOM again in the logs; tune lower if
   # you only ever process short clips and want to save money.
   cpu_kind = "shared"
-  cpus = 2
+  cpus = 4
   memory = "8gb"
 
 [deploy]
