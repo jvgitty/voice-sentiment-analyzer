@@ -76,6 +76,29 @@ class TestPipeline:
         assert result.audio.channels == 1
         assert abs(result.audio.duration_seconds - 1.0) < 0.1
 
+    @pytest.mark.asyncio
+    async def test_analyze_handles_m4a_input_via_internal_normalization(
+        self, fixture_m4a_path: Path
+    ) -> None:
+        """Wiring tracer: an m4a file passed directly to Pipeline.analyze
+        must be normalized internally to a WAV the wave-based metadata
+        reader can handle, then flow through the rest of the pipeline.
+        Without this wiring the unit tests for normalize_audio pass but
+        production m4a uploads still fail at Pipeline.analyze's first
+        wave.open call."""
+        pipeline = Pipeline(
+            transcriber=_StubTranscriber(),
+            emotion_analyzer=_StubEmotionAnalyzer(),
+        )
+        result = await pipeline.analyze(fixture_m4a_path)
+
+        # The audio metadata reflects the post-normalization WAV
+        # (16 kHz mono), not the original m4a's encoded properties.
+        assert result.schema_version == "1.0"
+        assert result.audio.sample_rate == 16000
+        assert result.audio.channels == 1
+        assert abs(result.audio.duration_seconds - 1.0) < 0.2
+
         # Slices 2+3+4+5+6+7 wire up every section; windows is now a
         # non-empty list of WindowMetrics covering the full audio.
         from vsa.schema import WindowMetrics

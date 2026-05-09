@@ -10,7 +10,7 @@ from vsa.auth import AuthError, AuthVerifier, CallbackSigner
 from vsa.pipeline import Pipeline
 from vsa.schema import AnalyzeRequest, AnalyzeResult, CallbackBody
 
-app = FastAPI(title="Voice Sentiment Analyzer", version="0.1.0")
+app = FastAPI(title="Voice Sentiment Analyzer", version="0.1.1")
 
 
 _ALLOWED_AUDIO_TYPES = {
@@ -20,6 +20,14 @@ _ALLOWED_AUDIO_TYPES = {
     "audio/mp3",
     "audio/ogg",
     "audio/flac",
+    # Pixel voice notes and other modern recorders. These containers
+    # require ffmpeg-based normalization downstream (see vsa.preprocess);
+    # the AudioFetcher accepts them, the Pipeline's preprocessing step
+    # transcodes them to 16 kHz mono PCM WAV before the wave reader.
+    "audio/mp4",
+    "audio/m4a",
+    "audio/aac",
+    "audio/webm",
 }
 _DEFAULT_MAX_AUDIO_BYTES = 50 * 1024 * 1024  # 50MB
 
@@ -64,12 +72,30 @@ async def analyze(
         if audio_path.exists():
             audio_path.unlink(missing_ok=True)
 
-    callback = CallbackBody(
-        request_id=request.request_id,
-        status="completed",
-        metadata=request.metadata,
-        result=result,
-    )
+    # Hard transcription failure: the rest of the pipeline produced
+    # nothing the supabase callback can render, so we explicitly mark
+    # the run as failed rather than emit a "completed" callback with
+    # an empty transcript. Downstream consumers (analyze-callback in
+    # the supabase project) take a single failure code path on this
+    # status — see PRD #1, Q7/Q8 in the design conversation.
+    if result.transcription is None:
+        error_messages = result.processing.errors or [
+            "transcription returned no text"
+        ]
+        callback = CallbackBody(
+            request_id=request.request_id,
+            status="failed",
+            metadata=request.metadata,
+            result=result,
+            error={"messages": error_messages},
+        )
+    else:
+        callback = CallbackBody(
+            request_id=request.request_id,
+            status="completed",
+            metadata=request.metadata,
+            result=result,
+        )
     body_bytes = callback.model_dump_json().encode("utf-8")
     signature = CallbackSigner.sign(body_bytes, request.callback_secret)
 

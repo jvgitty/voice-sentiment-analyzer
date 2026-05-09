@@ -1,5 +1,7 @@
 """Shared pytest fixtures."""
 
+import shutil
+import subprocess
 from pathlib import Path
 import wave
 
@@ -34,6 +36,41 @@ def fixture_wav_path(tmp_path: Path) -> Path:
         f.writeframes(samples_int16.tobytes())
 
     return path
+
+
+def _transcode_via_ffmpeg(src: Path, dst: Path, *codec_args: str) -> Path:
+    """Re-encode ``src`` to ``dst`` via ffmpeg with the given codec args.
+
+    Skips the test (``pytest.skip``) when ffmpeg isn't on PATH so the
+    suite still runs on dev machines that haven't installed it. CI and
+    the Docker image both have ffmpeg available.
+    """
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg not on PATH; install ffmpeg to run this test")
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), *codec_args, str(dst)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg transcode failed (rc={result.returncode}): {result.stderr}"
+        )
+    return dst
+
+
+@pytest.fixture
+def fixture_m4a_path(fixture_wav_path: Path, tmp_path: Path) -> Path:
+    """The synthesized WAV fixture re-encoded as AAC-in-MP4 (.m4a).
+
+    Pixel voice notes arrive in this format; the analyzer's WAV-only
+    pipeline can't read them without preprocessing.
+    """
+    return _transcode_via_ffmpeg(
+        fixture_wav_path,
+        tmp_path / "sample.m4a",
+        "-c:a", "aac", "-b:a", "64k",
+    )
 
 
 @pytest.fixture
