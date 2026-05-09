@@ -50,28 +50,33 @@ primary_region = "iad"  # Ashburn, VA. Change to e.g. "lhr", "fra", "sjc" as nee
     soft_limit = 1
 
 [[vm]]
-  # 4 shared CPUs + 8 GB RAM. Both bumped from the original 2 CPUs /
-  # 4 GB after production OOM during the v0.1.1 smoke test: loading
-  # NeMo Parakeet + audeering wav2vec2 + SpeechBrain IEMOCAP into a
-  # single Python process peaks at ~5-6 GB resident on first request,
-  # which 4 GB couldn't hold. The kernel SIGKILL'd the whole machine
-  # and Fly auto-restarted it, losing the in-flight job.
+  # 4 shared CPUs + 16 GB RAM.
   #
-  # 8 GB has comfortable headroom for the loaded ML stack plus the
-  # per-window emotion re-runs the WindowedAnalyzer fires. Auto-suspend
-  # means we only pay for memory while the machine is awake; idle cost
-  # remains near zero.
+  # Memory bumped twice during the v0.1.1 smoke testing:
+  #   * 4 GB OOM'd during model load (kernel SIGKILL'd the machine).
+  #   * 8 GB OOM'd at 7.89 GB resident — we were 1 GB short.
+  #   * 16 GB is the comfortable size for the actual peak.
+  #
+  # Real measured peak: ~7.9 GB resident with NeMo Parakeet + audeering
+  # wav2vec2 + SpeechBrain IEMOCAP all loaded in one Python process,
+  # plus per-window emotion re-runs from the WindowedAnalyzer.
+  # 16 GB gives ~8 GB headroom for spikes.
   #
   # 4 CPUs (vs 2) lets torch / numpy BLAS / Parakeet inference fan out,
-  # noticeably reducing wall-clock time per request. Since cost is
-  # billed per machine-second-awake, faster requests mean lower overall
-  # cost despite the higher hourly rate.
+  # noticeably reducing wall-clock per request. Since billing is per
+  # machine-second-awake, faster requests mean lower overall cost
+  # despite the higher hourly rate.
   #
-  # Tune higher if you ever see OOM again in the logs; tune lower if
-  # you only ever process short clips and want to save money.
+  # Auto-suspend keeps idle cost near zero. The 16 GB allocation is
+  # only billed while the machine is awake processing a job.
+  #
+  # Tune higher if OOM ever recurs (peak should not move much from
+  # 8 GB unless we add another model); tune lower only if we ever
+  # refactor the analyzer to load/unload models per phase rather
+  # than keeping all three resident simultaneously.
   cpu_kind = "shared"
   cpus = 4
-  memory = "8gb"
+  memory = "16gb"
 
 [deploy]
   # Roll back to the previous release on failed health checks rather
