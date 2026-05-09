@@ -11,6 +11,7 @@ from vsa.composites import CompositeScorer, ScoreInputs
 from vsa.features.acoustic import AcousticAnalyzer
 from vsa.features.emotion import EmotionAnalyzer
 from vsa.features.prosody import ProsodyAnalyzer
+from vsa.preprocess import normalize_audio
 from vsa.schema import AnalyzeResult, AudioInfo, ProcessingInfo
 from vsa.transcription import make_transcriber
 from vsa.windowed import WindowedAnalyzer
@@ -136,6 +137,26 @@ class Pipeline:
         started_at = datetime.now(timezone.utc)
         errors: list[str] = []
 
+        # Normalize whatever format we were handed (m4a, mp4, aac, webm,
+        # mp3, ogg, flac, or wav itself) to 16 kHz mono PCM WAV before
+        # the wave-based metadata read below. Caller still owns the
+        # original ``audio_path``; we own the normalized tmp file and
+        # clean it up at the end of this method.
+        normalized_path = normalize_audio(audio_path)
+        try:
+            return await self._analyze_normalized(
+                normalized_path, started_at, errors
+            )
+        finally:
+            if normalized_path != audio_path and normalized_path.exists():
+                normalized_path.unlink(missing_ok=True)
+
+    async def _analyze_normalized(
+        self,
+        audio_path: Path,
+        started_at: datetime,
+        errors: list[str],
+    ) -> AnalyzeResult:
         with wave.open(str(audio_path), "rb") as f:
             n_frames = f.getnframes()
             sample_rate = f.getframerate()
