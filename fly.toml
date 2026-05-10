@@ -60,35 +60,43 @@ primary_region = "iad"  # Ashburn, VA. Change to e.g. "lhr", "fra", "sjc" as nee
     soft_limit = 1
 
 [[vm]]
-  # 4 shared CPUs + 8 GB RAM.
+  # 8 shared CPUs + 16 GB RAM.
   #
   # Memory history during v0.1.1 smoke testing:
-  #   * 4 GB OOM'd during model load (kernel SIGKILL'd the machine).
-  #   * 8 GB OOM'd at 7.89 GB resident — pipeline kept Parakeet +
-  #     SpeechBrain IEMOCAP loaded the whole request even though
-  #     neither was used during the windowed pass.
-  #   * Bumped to 16 GB briefly, but Fly's shared-cpu-4x plan caps at
-  #     8192 MiB. Going higher would require shared-cpu-8x (double
-  #     billing) or performance-Nx.
-  #   * PR #33 evicts both unused caches between phases (~3 GB
-  #     reclaimed before the heavy windowed pass), bringing peak
-  #     comfortably back under 8 GB without paying for more CPUs.
+  #   * 4 GB OOM'd during model load.
+  #   * 8 GB / shared-cpu-4x OOM'd at 7.89 GB resident with a real
+  #     13-min voice note. Three optimization PRs walked the cause
+  #     down but didn't get under the 8 GB cap:
+  #       - PR #33: evict Parakeet + SpeechBrain caches between
+  #         pipeline phases. Correct optimization, but didn't help
+  #         this OOM because the peak happens INSIDE Parakeet's
+  #         model.transcribe() call, before any caller-level eviction
+  #         can fire.
+  #       - PR #35: chunk audio into 60s segments before calling
+  #         model.transcribe(), so per-chunk attention activations
+  #         stay bounded. Confirmed working — per-chunk peak is small.
+  #       - PR #36: malloc_trim(0) between chunks + MALLOC_ARENA_MAX=2
+  #         to fight glibc's reluctance to return free pages to the
+  #         kernel. Measurable: total-vm dropped from 17.5 GB → 16.2 GB
+  #         across 11 chunks, but RSS still hit the 8 GB cap on chunk
+  #         12 of 13 due to residual intra-arena fragmentation.
   #
-  # 4 CPUs (vs 2) lets torch / numpy BLAS / Parakeet inference fan out,
-  # noticeably reducing wall-clock per request. Since billing is per
-  # machine-second-awake, faster requests mean lower overall cost
-  # despite the higher hourly rate.
+  # Bumping to shared-cpu-8x with 16 GB is the simplest path to
+  # finishing a 13-min request (and the up-to-20-min voice notes the
+  # service is built for). Doubles per-second billing vs shared-cpu-4x,
+  # but auto_stop_machines = "suspend" means idle cost stays near zero
+  # — we only pay during the ~minutes a request is in flight. The 8
+  # extra CPU shares also let Parakeet's per-chunk transcribe finish
+  # faster, partially offsetting the higher rate.
   #
-  # Auto-suspend keeps idle cost near zero. The 8 GB allocation is
-  # only billed while the machine is awake processing a job.
-  #
-  # Tune higher (and switch to shared-cpu-8x or performance-Nx) only if
-  # OOM recurs after PR #33's eviction landed. Tune lower only if we
-  # ever rework the windowed pass to also stream the dimensional model
-  # in/out per window.
+  # 16 GB gives ~8 GB headroom over the measured 7.88 GB OOM peak.
+  # Tune lower (and revert to shared-cpu-4x) only after a future
+  # refactor materially cuts that peak — e.g. moving Parakeet to a
+  # quantized model or running each chunk in a subprocess to fully
+  # release memory between iterations.
   cpu_kind = "shared"
-  cpus = 4
-  memory = "8gb"
+  cpus = 8
+  memory = "16gb"
 
 [deploy]
   # Roll back to the previous release on failed health checks rather
