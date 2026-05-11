@@ -111,7 +111,7 @@ class TestAnalyzeEndpoint:
 
             assert response.status_code == 200
             payload = response.json()
-            assert payload["schema_version"] == "1.0"
+            assert payload["schema_version"] == "2.0"
             assert payload["audio"]["sample_rate"] == 16000
 
             assert callback_route.call_count == 1
@@ -128,7 +128,7 @@ class TestAnalyzeEndpoint:
             assert decoded["request_id"] == "req-1"
             assert decoded["status"] == "completed"
             assert decoded["metadata"] == {"note_id": "abc"}
-            assert decoded["result"]["schema_version"] == "1.0"
+            assert decoded["result"]["schema_version"] == "2.0"
 
     def test_null_transcription_fires_failed_status_callback(
         self, client: TestClient, fixture_wav_bytes: bytes

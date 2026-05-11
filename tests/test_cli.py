@@ -17,7 +17,7 @@ class TestCliAnalyze:
 
         assert result.exit_code == 0, result.stdout
         payload = json.loads(result.stdout)
-        assert payload["schema_version"] == "1.0"
+        assert payload["schema_version"] == "2.0"
 
     def test_analyze_writes_json_to_out_path(
         self, fixture_wav_path: Path, tmp_path: Path
@@ -30,7 +30,7 @@ class TestCliAnalyze:
         assert result.exit_code == 0, result.stdout
         assert out_path.exists()
         payload = json.loads(out_path.read_text())
-        assert payload["schema_version"] == "1.0"
+        assert payload["schema_version"] == "2.0"
         # When writing to file, stdout should not contain the JSON payload.
         assert "schema_version" not in result.stdout
 
@@ -59,4 +59,3 @@ class TestCliAnalyze:
         assert result.exit_code == 0, result.output
         assert "--out" in result.output
         assert "--engine" in result.output
-        assert "--window-seconds" in result.output

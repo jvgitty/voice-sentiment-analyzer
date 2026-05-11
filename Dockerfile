@@ -1,13 +1,13 @@
 FROM python:3.12-slim
 
-# Slice 3 pins the base image to 3.12: nemo_toolkit[asr] supports 3.10–3.12
-# cleanly. The local dev venv runs 3.13 (NeMo installs there too as of 2.7),
-# but 3.12 is the safe production target.
+# Base image pinned to 3.12: nemo_toolkit[asr] supports 3.10-3.12 cleanly.
+# Local dev venv runs 3.13 (NeMo installs there too as of 2.7), but 3.12
+# is the safe production target.
 
 WORKDIR /app
 
-# System libs needed by audio/ML deps:
-#   - ffmpeg, libsndfile1: librosa / soundfile audio backends.
+# System libs for audio I/O and NeMo's preprocessing:
+#   - ffmpeg, libsndfile1: audio decode / WAV I/O.
 #   - libsox-fmt-all, sox:  NeMo audio preprocessing.
 #   - git: NeMo pulls a couple of git-only requirements at install time.
 RUN apt-get update \
@@ -21,35 +21,32 @@ RUN apt-get update \
 
 COPY pyproject.toml ./
 COPY src/ ./src/
-# composites.yaml is the editable spec for confidence/engagement/calmness
-# formulas (Slice 6). Pipeline.__init__ loads it at request time via
-# CompositeScorer.from_yaml; without it in the image, every request 500s
-# at pipeline construction.
-COPY composites.yaml ./
 
 RUN pip install --no-cache-dir .
 
-# Lazy-download models at runtime instead of baking them into the image.
+# Lazy-download Parakeet at runtime instead of baking it into the image.
 #
-# The PRD originally called for baking model weights to keep cold starts
-# fast. We tried, but Fly Machines cap rootfs at 8 GB uncompressed across
-# every VM size, and the three baked models (~4 GB together) push the
-# image over that limit ("Not enough space to unpack image").
+# Fly Machines cap rootfs at 8 GB uncompressed across every VM size.
+# The Python deps (torch + NeMo + faster-whisper) already push the
+# image to ~3 GB; adding Parakeet's ~2 GB on top puts us within
+# margin of that cap.
 #
-# The compromise: ship only the dependencies in the image (already ~3 GB
-# from torch/NeMo/transformers/speechbrain), and let the runtime first-
-# request pull each model on demand. This is one-time-per-Machine cost:
-# Fly's local disk persists across auto-suspend cycles, so models are
-# only re-fetched if the Machine is destroyed and recreated (e.g. on
-# redeploy or region change).
+# The compromise: ship only the dependencies in the image, and let
+# the runtime first-request pull Parakeet on demand. This is one-time-
+# per-Machine cost: Fly's local disk persists across auto-suspend
+# cycles, so the model is only re-fetched if the Machine is destroyed
+# and recreated (e.g. on redeploy or region change).
 #
-# First-request latency after a fresh deploy: roughly 3-5 minutes total
-# while Parakeet (~2 GB), audeering wav2vec2 (~1 GB), and SpeechBrain
-# IEMOCAP (~1 GB) download in sequence on demand. Acceptable for the
-# webhook-callback architecture (the caller is fire-and-forget anyway).
+# First-request latency after a fresh deploy: ~30-60s while Parakeet
+# downloads. Acceptable for the webhook-callback architecture.
 #
-# HF_HOME stays set so all three libraries cache to the same well-known
-# location, surviving suspend/resume on the Machine's local disk.
+# HF_HOME stays set so the cache lives at a well-known location,
+# surviving suspend/resume on the Machine's local disk.
+#
+# When the LLM extraction layer lands (Phase 2/3 of the pivot), the
+# next Dockerfile revision will either bake the Qwen3.5-9B-Instruct
+# GGUF in or lazy-pull it the same way Parakeet does today, depending
+# on the final image-size math.
 ENV HF_HOME=/opt/hf-cache
 
 EXPOSE 8080
