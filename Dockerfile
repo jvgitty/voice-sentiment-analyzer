@@ -68,7 +68,7 @@ ENV HF_HOME=/opt/hf-cache
 # CPU build; _resolve_gguf_path in vsa.extraction.llm uses them.
 ENV LLM_MODEL_PATH=/opt/models/qwen3.5-9b-instruct-q4_k_m.gguf
 ENV LLM_GGUF_REPO=Smoffyy/Qwen3.5-9B-Instruct-Pure-GGUF
-ENV LLM_GGUF_FILE=Qwen3.5-9B-Q4_K_M.gguf
+ENV LLM_GGUF_FILE=Qwen3.5-9B-q4_k_m.gguf
 
 # Offload all model layers to GPU. -1 = use as many as fit in VRAM,
 # which on the A10's 24 GB is all of them for a Q4_K_M 9B model.
