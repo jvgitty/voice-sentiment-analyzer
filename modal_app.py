@@ -114,7 +114,7 @@ image = (
             "HF_HOME": "/opt/hf-cache",
             "LLM_MODEL_PATH": "/opt/models/qwen3.5-9b-instruct-q4_k_m.gguf",
             "LLM_GGUF_REPO": "Smoffyy/Qwen3.5-9B-Instruct-Pure-GGUF",
-            "LLM_GGUF_FILE": "Qwen3.5-9B-Q4_K_M.gguf",
+            "LLM_GGUF_FILE": "Qwen3.5-9B-q4_k_m.gguf",
             "LLM_N_GPU_LAYERS": "-1",
         }
     )

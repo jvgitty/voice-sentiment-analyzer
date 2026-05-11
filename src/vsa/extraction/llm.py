@@ -42,9 +42,11 @@ Configuration via env vars
                            When the file at this path doesn't exist,
                            we fall through to the HF download.
 ``LLM_GGUF_REPO``        — HuggingFace repo to pull the GGUF from.
-                           Default: ``bartowski/Qwen_Qwen3.5-9B-Instruct-GGUF``.
+                           Default: ``Smoffyy/Qwen3.5-9B-Instruct-Pure-GGUF``.
 ``LLM_GGUF_FILE``        — Specific GGUF filename inside the repo.
-                           Default: ``Qwen_Qwen3.5-9B-Instruct-Q4_K_M.gguf``.
+                           Default: ``Qwen3.5-9B-q4_k_m.gguf`` (note:
+                           lowercase — Smoffyy's convention, distinct
+                           from bartowski's typical uppercase Q4_K_M).
 ``LLM_CONTEXT_SIZE``     — context window in tokens. Default: ``8192``.
                            A 20-min transcript runs ~4-5K tokens, and the
                            system prompt is ~1K, so 8K leaves room for
@@ -81,10 +83,10 @@ DEFAULT_MODEL_PATH = "/opt/models/qwen3.5-9b-instruct-q4_k_m.gguf"
 # Qwen/Qwen3.5-9B weights with no modifications. Apache 2.0.
 # bartowski / lmstudio-community do not yet have Qwen3.5-9B-Instruct
 # GGUF builds as of 2026-05; this is the most established vanilla
-# quant. Note: the file is named ``Qwen3.5-9B-Q4_K_M.gguf`` (no
+# quant. Note: the file is named ``Qwen3.5-9B-q4_k_m.gguf`` (no
 # ``-Instruct``) even though the repo name has it.
 DEFAULT_GGUF_REPO = "Smoffyy/Qwen3.5-9B-Instruct-Pure-GGUF"
-DEFAULT_GGUF_FILE = "Qwen3.5-9B-Q4_K_M.gguf"
+DEFAULT_GGUF_FILE = "Qwen3.5-9B-q4_k_m.gguf"
 DEFAULT_CONTEXT_SIZE = 8192
 DEFAULT_THREADS = 0  # 0 = let llama.cpp auto-detect
 DEFAULT_TEMPERATURE = 0.2
