@@ -25,8 +25,13 @@ dependencies = [
     "faster-whisper>=1.0",
     # Local LLM runtime for structured extraction. CPU-only by default;
     # the build wheel ships pre-compiled for x86_64 Linux and macOS.
-    # Phase 3 will bake the GGUF model file into the Docker image.
     "llama-cpp-python>=0.2.90",
+    # Used for the lazy-download path that pulls the Qwen3.5-9B GGUF
+    # on first request (Parakeet is baked into the Docker image,
+    # Qwen is not — see Dockerfile + extraction/llm.py for the
+    # rationale). Already a transitive dep of NeMo / faster-whisper,
+    # pinned explicitly here so the contract stays stable.
+    "huggingface-hub>=0.24",
 ]
 
 [project.optional-dependencies]

@@ -185,7 +185,23 @@ with zero overhead.
 | `WHISPER_MODEL` | `small` | Whisper model size when `TRANSCRIBER_ENGINE=whisper` |
 | `PARAKEET_CHUNK_SECONDS` | `60` | Chunk length for long-audio transcription |
 | `MAX_AUDIO_BYTES` | `52428800` (50 MB) | Reject oversized audio uploads early |
-| `HF_HOME` | `/opt/hf-cache` | Model cache location on Fly |
+| `HF_HOME` | `/opt/hf-cache` | Model cache location (Parakeet + lazy-pulled GGUFs) |
+| `LLM_MODEL_PATH` | `/opt/models/qwen3.5-9b-instruct-q4_k_m.gguf` | Local GGUF path. If the file exists, used directly; otherwise the lazy-download path below kicks in. |
+| `LLM_GGUF_REPO` | `bartowski/Qwen_Qwen3.5-9B-Instruct-GGUF` | HuggingFace repo for the lazy-download fallback. |
+| `LLM_GGUF_FILE` | `Qwen_Qwen3.5-9B-Instruct-Q4_K_M.gguf` | GGUF filename inside the repo. |
+| `LLM_CONTEXT_SIZE` | `8192` | LLM context window in tokens. |
+| `LLM_THREADS` | `0` (auto) | n_threads for CPU inference. |
+| `LLM_TEMPERATURE` | `0.2` | Sampling temperature. Low for consistent extraction. |
+| `LLM_MAX_OUTPUT_TOKENS` | `2048` | Cap on JSON output length. |
+
+## Where the models live
+
+| Model | Source | Loaded |
+|-------|--------|--------|
+| **Parakeet TDT 0.6B** (transcription) | Baked into the Docker image at build time (~2 GB). | On disk the moment uvicorn binds. First-request transcription pays no download cost. |
+| **Qwen3.5-9B-Instruct Q4_K_M** (extraction) | Lazy-downloaded from HuggingFace on first request (~5.5 GB). Cached under `HF_HOME` so subsequent requests on the same Machine skip the network. | Each fresh Fly Machine pays a one-time ~1–2 min download cost on first `/analyze`; later requests reuse the cache. |
+
+The asymmetric strategy exists because Fly Machines cap rootfs at 8 GB; baking both models would push the image over the limit. Operators on hosts without that constraint can bake the Qwen GGUF too — see the commented-out `RUN` block in the `Dockerfile`.
 
 ---
 
