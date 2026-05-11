@@ -1,15 +1,18 @@
 """Pydantic models for the analyzer's request, result, and callback shapes.
 
-v0.2 scope (post-pivot): transcription-only. The structured-extraction
-layer (LLM-derived tags / entities / tasks) lands in a follow-up PR; for
-now ``AnalyzeResult`` carries the Parakeet transcript and the audio /
-processing metadata that came with it.
+v0.2 scope: transcription + LLM-based structured extraction. The
+extraction layer's input/output types live under :mod:`vsa.extraction`;
+this module re-exposes the result type on :class:`AnalyzeResult` and
+accepts a per-request voice-note-type override on :class:`AnalyzeRequest`.
 """
 
 from datetime import datetime
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, HttpUrl
+
+from vsa.extraction.schema import ExtractionResult
+from vsa.extraction.types import VoiceNoteType
 
 
 class AudioInfo(BaseModel):
@@ -43,6 +46,7 @@ class AnalyzeResult(BaseModel):
     schema_version: str = "2.0"
     audio: AudioInfo
     transcription: Optional[Transcript] = None
+    extraction: Optional[ExtractionResult] = None
     processing: ProcessingInfo
 
 
@@ -52,6 +56,11 @@ class AnalyzeRequest(BaseModel):
     callback_secret: str = Field(min_length=16)
     metadata: dict[str, Any]
     request_id: str
+    # Optional per-request override for the voice-note type catalog.
+    # When omitted, the default catalog from vsa.extraction.types
+    # applies. The multi-tenant per-client persistent overrides
+    # described in docs/ROADMAP.md build on top of this.
+    voice_note_types: Optional[list[VoiceNoteType]] = None
 
 
 class CallbackBody(BaseModel):

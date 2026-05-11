@@ -10,7 +10,7 @@ from vsa.auth import AuthError, AuthVerifier, CallbackSigner
 from vsa.pipeline import Pipeline
 from vsa.schema import AnalyzeRequest, AnalyzeResult, CallbackBody
 
-app = FastAPI(title="Voice Sentiment Analyzer", version="0.1.1")
+app = FastAPI(title="Voice Note Transcription", version="0.2.0")
 
 
 _ALLOWED_AUDIO_TYPES = {
@@ -73,7 +73,14 @@ async def analyze(
 ) -> AnalyzeResult:
     audio_path = await fetcher.fetch(str(request.audio_url))
     try:
-        result = await pipeline.analyze(audio_path)
+        # The per-request ``voice_note_types`` override flows through
+        # to the LLM extractor. When ``None``, the extractor falls
+        # back to the default catalog (idea / journal / task /
+        # meditation / other) defined in vsa.extraction.types.
+        result = await pipeline.analyze(
+            audio_path,
+            voice_note_types=request.voice_note_types,
+        )
     finally:
         if audio_path.exists():
             audio_path.unlink(missing_ok=True)
