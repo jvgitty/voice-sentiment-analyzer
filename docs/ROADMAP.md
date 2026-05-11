@@ -148,6 +148,40 @@ don't have to branch on the model.
 
 ---
 
+## Platform decision: Modal (post-Fly pivot, 2026-05)
+
+The v0.2 pivot from sentiment analysis to transcription + LLM
+extraction was initially deployed to Fly.io's shared-CPU machines.
+That didn't work: Parakeet's chunked-inference memory grows
+monotonically with audio length on CPU, and we OOM'd at every memory
+cap we set (4 GB → 8 GB → 16 GB). We then tried Fly's GPU offering
+and discovered that Fly is no longer onboarding new GPU customers
+(see [Fly's blog post](https://fly.io/blog/wrong-about-gpu/)).
+
+Moved to **Modal** for the GPU runtime:
+
+- T4 GPU at ~$0.59/hr, scale-to-zero, $30/month free credits on
+  Starter plan covers early-customer beta volume.
+- Modal Enterprise tier offers BAA for HIPAA workloads — the upgrade
+  path when actually signing regulated customers.
+- Python-native deployment (`modal deploy modal_app.py`) avoids the
+  Dockerfile + fly.toml + secrets-set ceremony that bit us repeatedly
+  on Fly.
+
+The Fly artifacts (`fly.toml`, `Dockerfile`) are preserved in the repo
+as documentation of the failed path. Eventually they should move to
+a `legacy/` directory or be deleted.
+
+When to revisit:
+- If Modal's pricing changes meaningfully, or
+- If a workload-shape change (e.g. always-on inference, batch
+  processing) makes RunPod / Hetzner / bare metal genuinely
+  cheaper at our scale, or
+- If we want a multi-region active-active deployment Modal can't
+  easily express.
+
+---
+
 ## Lessons captured from v0.1.1 (sentiment analyzer)
 
 Kept here so the same mistakes don't recur in v2 / v3 architecture

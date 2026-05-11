@@ -68,7 +68,75 @@ a single failure code path on this status.
 
 ---
 
-## Deploy to Fly.io in 5 minutes
+## Deploy to Modal in 5 minutes
+
+The shipped `modal_app.py` deploys to a **T4 GPU container** on Modal
+(~$0.59/hr while running, $0 when idle, auto-scales to zero). The
+[Modal Starter plan](https://modal.com/pricing) is free with $30/month
+in compute credits — that covers tens of requests/day during early
+customer beta.
+
+**Prerequisites (one-time):**
+
+```bash
+pip install modal
+modal token new        # opens browser to authenticate
+
+# Create the secret that holds API_KEY (and any other env-var overrides).
+# Generate a random key:
+modal secret create voice-note-transcription-secrets \
+    API_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+```
+
+**Deploy:**
+
+```bash
+modal deploy modal_app.py
+```
+
+First build takes ~10 minutes (the CUDA torch wheel is ~3 GB).
+Subsequent deploys reuse cached image layers and finish in seconds.
+Modal prints an HTTPS URL when deployment is complete — that's your
+service endpoint.
+
+**Smoke test:**
+
+```bash
+curl -X POST https://<your-modal-app-url>.modal.run/analyze \
+  -H "Authorization: Bearer <the-API_KEY-you-set>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "audio_url": "https://<some-public-audio.wav>",
+    "callback_url": "https://webhook.site/<your-test-token>",
+    "callback_secret": "0123456789abcdef0123456789abcdef",
+    "metadata": {"note_id": "smoke-test"},
+    "request_id": "smoke-1"
+  }'
+```
+
+The first request after a fresh deploy pays a one-time download
+cost (~3 min) while Parakeet and Qwen3.5-9B fetch from HuggingFace
+onto Modal's persistent volume. Subsequent requests reuse the cached
+weights and complete in ~30–60s including GPU inference.
+
+### HIPAA / BAA path
+
+Modal Starter does **not** carry a BAA. For HIPAA workloads (signing
+hospitals or law firms as actual customers), upgrade your Modal
+organization to Enterprise — the BAA is part of that tier. **The code
+in this repo does not change** between Starter and Enterprise; only
+the org-level plan does.
+
+---
+
+## Legacy reference: Deploy to Fly.io
+
+> The original deployment target was Fly.io. We pivoted to Modal in
+> 2026-05 after the shared-CPU machines couldn't hold Parakeet's
+> memory profile on long audio and Fly's GPU offering wasn't
+> available to new customers. The `Dockerfile` and `fly.toml` are
+> preserved in the repo as documentation; they are no longer the
+> deployment path.
 
 You'll need a Fly.io account with a payment method on file and **GPU
 access enabled** (Fly gates GPU machines behind a billing-verified
@@ -76,10 +144,7 @@ flag). Install the `flyctl` CLI from
 [fly.io/docs/hands-on/install-flyctl](https://fly.io/docs/hands-on/install-flyctl/).
 
 The shipped `fly.toml` deploys to an **A10 GPU machine** (24 GB VRAM,
-~$1.50/hr while running, auto-suspends to ~$0 when idle). GPU is
-required: an earlier CPU-only deployment hit the wall on long-audio
-transcription regardless of memory tuning. The full rationale is in
-the `fly.toml` comment block.
+~$1.50/hr while running, auto-suspends to ~$0 when idle).
 
 GPU machines are only available in a subset of Fly regions. As of
 2026-05, common GPU regions are `iad` (Ashburn), `ord` (Chicago),
