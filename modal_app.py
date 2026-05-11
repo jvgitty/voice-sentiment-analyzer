@@ -57,13 +57,32 @@ APP_NAME = "voice-note-transcription"
 # ---------------------------------------------------------------------------
 # Image definition
 # ---------------------------------------------------------------------------
-# Mirrors the Fly Dockerfile but expressed in Modal's Python-native
-# build API. Order matters: CUDA-enabled torch and llama-cpp-python
-# must be installed BEFORE the project's PyPI deps so pip's resolver
-# sees them already satisfied and doesn't pull the CPU-only PyPI
-# wheels.
+# Base: NVIDIA's CUDA 12.1 runtime image with cuDNN 8.
+#
+# Why not debian_slim: an earlier attempt used debian_slim plus the
+# CUDA-enabled torch wheel. That worked for torch (its CUDA wheel
+# bundles its own runtime libs) but llama-cpp-python's CUDA build
+# uses ctypes.dlopen to find ``libcudart.so.12``, which checks
+# standard system paths (LD_LIBRARY_PATH + /usr/lib + /usr/local/cuda),
+# not torch's bundled libs. The deploy succeeded but the extractor
+# crashed on first inference with:
+#
+#   Failed to load shared library 'libllama.so':
+#     libcudart.so.12: cannot open shared object file
+#
+# Switching to ``nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04``
+# puts libcudart in /usr/local/cuda/lib64 where llama-cpp-python's
+# loader finds it. cuDNN is included for completeness; some torch
+# ops depend on it transitively.
+#
+# Order matters: CUDA-enabled torch and llama-cpp-python must be
+# installed BEFORE the project's PyPI deps so pip's resolver sees
+# them already satisfied and doesn't pull the CPU-only PyPI wheels.
 image = (
-    modal.Image.debian_slim(python_version="3.12")
+    modal.Image.from_registry(
+        "nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04",
+        add_python="3.12",
+    )
     # System libs for audio I/O and NeMo's preprocessing path.
     .apt_install(
         "ffmpeg",
