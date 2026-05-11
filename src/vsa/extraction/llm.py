@@ -56,6 +56,11 @@ Configuration via env vars
                            not creative writing.
 ``LLM_MAX_OUTPUT_TOKENS`` — cap on JSON output length. Default: ``2048``.
                            Plenty for our schema even with many tasks.
+``LLM_N_GPU_LAYERS``     — model layers offloaded to GPU. Default: ``-1``
+                           (offload all). Set to ``0`` for CPU-only
+                           inference. Requires the CUDA build of
+                           llama-cpp-python (the Dockerfile installs
+                           it from the cu121 wheel index).
 """
 
 from __future__ import annotations
@@ -78,6 +83,12 @@ DEFAULT_CONTEXT_SIZE = 8192
 DEFAULT_THREADS = 0  # 0 = let llama.cpp auto-detect
 DEFAULT_TEMPERATURE = 0.2
 DEFAULT_MAX_OUTPUT_TOKENS = 2048
+# Default to all layers on GPU. Requires the CUDA build of llama-cpp-
+# python (the Dockerfile installs it from abetlen's CUDA wheel index).
+# On non-GPU hosts an operator should set LLM_N_GPU_LAYERS=0 — the CPU
+# build of llama-cpp-python will silently no-op a positive value, but
+# being explicit avoids confusion when debugging.
+DEFAULT_N_GPU_LAYERS = -1
 
 
 def _env_int(name: str, default: int) -> int:
@@ -157,6 +168,9 @@ class LlmExtractor:
         self._max_output_tokens = _env_int(
             "LLM_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS
         )
+        self._n_gpu_layers = _env_int(
+            "LLM_N_GPU_LAYERS", DEFAULT_N_GPU_LAYERS
+        )
 
     def _load(self) -> Any:
         if self._model is None:
@@ -181,10 +195,12 @@ class LlmExtractor:
                 model_path=local_gguf,
                 n_ctx=self._context_size,
                 n_threads=self._threads,
-                # Force CPU. Production deployment is shared-cpu Fly; if
-                # someone runs this on a GPU box they can override with
-                # n_gpu_layers via a future env var.
-                n_gpu_layers=0,
+                # GPU offload. -1 (default) means "offload as many
+                # layers as fit in VRAM"; on the A10's 24 GB that's
+                # all of them for Q4_K_M 9B. Set LLM_N_GPU_LAYERS=0
+                # to force CPU-only inference (or when running the
+                # CPU build of llama-cpp-python locally).
+                n_gpu_layers=self._n_gpu_layers,
                 # Quiet llama.cpp's startup banner from polluting logs.
                 # Errors still surface via exceptions.
                 verbose=False,

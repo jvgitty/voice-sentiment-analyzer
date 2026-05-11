@@ -3,6 +3,13 @@ FROM python:3.12-slim
 # Base image pinned to 3.12: nemo_toolkit[asr] supports 3.10-3.12 cleanly.
 # Local dev venv runs 3.13 (NeMo installs there too as of 2.7), but 3.12
 # is the safe production target.
+#
+# GPU support note: we use a plain python:3.12-slim base rather than an
+# nvidia/cuda:* image. PyTorch's CUDA wheels ship their own bundled CUDA
+# runtime libs and llama-cpp-python's CUDA wheels do the same, so we
+# don't need the full nvidia/cuda base image (~2 GB of extra layers).
+# Fly's GPU machines pass through the NVIDIA driver from the host; the
+# wheels' bundled userspace libs talk to that driver directly.
 
 WORKDIR /app
 
@@ -19,59 +26,59 @@ RUN apt-get update \
         git \
     && rm -rf /var/lib/apt/lists/*
 
+# Install CUDA-enabled PyTorch BEFORE the rest of the dependencies.
+# pip's resolver will see torch already satisfied with the CUDA build
+# and won't try to pull the default (CPU-only) wheel from PyPI when
+# `pip install .` runs the project's dependency graph next.
+#
+# CUDA 12.1 chosen for compatibility with Fly's A10 GPU driver (which
+# supports CUDA 12.x). Bumping to a newer CUDA index URL is a one-line
+# change here when Fly's driver line catches up.
+RUN pip install --no-cache-dir torch \
+    --index-url https://download.pytorch.org/whl/cu121
+
+# Install CUDA-enabled llama-cpp-python from abetlen's prebuilt wheel
+# index. This is critical — the default PyPI wheel is CPU-only and
+# silently no-ops the n_gpu_layers parameter, leaving Qwen running on
+# CPU even though a GPU is available.
+RUN pip install --no-cache-dir llama-cpp-python \
+    --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
+
 COPY pyproject.toml ./
 COPY src/ ./src/
 
 RUN pip install --no-cache-dir .
 
-# Bake Parakeet TDT 0.6B into the image at build time (~2 GB).
-#
-# v0.1.1's lazy-load-on-first-request behavior turned into an operational
-# cliff: every fresh Machine paid a ~30-60s cold-start hit while the
-# weights pulled from HuggingFace. Baking eliminates that cliff for the
-# transcription stage entirely — Parakeet is on disk the instant uvicorn
-# binds.
-#
-# We bake by downloading via huggingface-hub (cheap, no model load) rather
-# than calling NeMo's from_pretrained (which would spin up the full ASR
-# loader and burn 30s of build time on every layer rebuild).
-#
-# HF_HOME at /opt/hf-cache is where huggingface-hub caches. NeMo / faster-
-# whisper / huggingface-hub all honor this path, so subsequent loads at
-# runtime hit the baked cache rather than re-downloading.
+# HF cache location, used by huggingface-hub for both Parakeet (lazy-
+# loaded by NeMo at first /analyze) and Qwen (lazy-loaded by our
+# extractor's _resolve_gguf_path helper).
 ENV HF_HOME=/opt/hf-cache
 
-RUN python -c "from huggingface_hub import snapshot_download; \
-    snapshot_download('nvidia/parakeet-tdt-0.6b-v2')"
+# We do NOT bake Parakeet into the image on the GPU build. Image size
+# math: python base + torch CUDA wheel + llama-cpp CUDA wheel + NeMo
+# deps already lands around 6-7 GB, and Fly's 8 GB rootfs cap doesn't
+# leave room for the +2 GB Parakeet bake the CPU build does.
+#
+# First-request cost for downloading Parakeet on a fresh Machine is
+# ~30-60 seconds at HuggingFace's typical bandwidth — negligible
+# compared to the multi-minute CPU times we used to fight, and the
+# download caches under HF_HOME for the lifetime of the Machine.
 
-# Qwen3.5-9B-Instruct GGUF (~5.5 GB) is NOT baked.
-#
-# Fly's rootfs cap is 8 GiB uncompressed. Baking both Parakeet (~2 GB) and
-# Qwen (~5.5 GB) on top of our ~2 GB of Python deps puts us at ~9.5 GB,
-# over the cap. We bake the smaller and 100%-of-requests-needed model
-# (Parakeet) and let the larger one lazy-pull on first /analyze.
-#
-# The lazy-pull path is implemented in vsa.extraction.llm._resolve_gguf_path:
-# if LLM_MODEL_PATH points at an existing file, use it; otherwise download
-# from LLM_GGUF_REPO / LLM_GGUF_FILE via huggingface_hub.hf_hub_download
-# (which caches under HF_HOME, so subsequent loads on the same Machine
-# skip the network call).
-#
-# Operators who want both baked (e.g. running on a non-Fly host with a
-# bigger rootfs) can set:
-#   RUN python -c "from huggingface_hub import hf_hub_download; \
-#       hf_hub_download(\
-#           repo_id='bartowski/Qwen_Qwen3.5-9B-Instruct-GGUF', \
-#           filename='Qwen_Qwen3.5-9B-Instruct-Q4_K_M.gguf')"
-# Image size will grow by ~5.5 GB.
+# Lazy-pull config for Qwen3.5-9B-Instruct GGUF. Same env vars as the
+# CPU build; _resolve_gguf_path in vsa.extraction.llm uses them.
 ENV LLM_MODEL_PATH=/opt/models/qwen3.5-9b-instruct-q4_k_m.gguf
 ENV LLM_GGUF_REPO=bartowski/Qwen_Qwen3.5-9B-Instruct-GGUF
 ENV LLM_GGUF_FILE=Qwen_Qwen3.5-9B-Instruct-Q4_K_M.gguf
 
+# Offload all model layers to GPU. -1 = use as many as fit in VRAM,
+# which on the A10's 24 GB is all of them for a Q4_K_M 9B model.
+# An operator who wants partial CPU offload (e.g. to free VRAM for
+# concurrent requests in the future) can override this env var.
+ENV LLM_N_GPU_LAYERS=-1
+
 # Pre-create the /opt/models directory so an operator (or a future
-# Phase-3 follow-up) can drop a GGUF file there without futzing with
-# permissions. Empty by default; the lazy-pull path takes over when
-# the file isn't found.
+# follow-up) can drop a GGUF file there. Empty by default; the
+# lazy-pull path takes over when the file isn't found.
 RUN mkdir -p /opt/models
 
 EXPOSE 8080

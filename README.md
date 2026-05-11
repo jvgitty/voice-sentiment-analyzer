@@ -70,9 +70,21 @@ a single failure code path on this status.
 
 ## Deploy to Fly.io in 5 minutes
 
-You'll need a Fly.io account with a payment method on file. Install the
-`flyctl` CLI from
+You'll need a Fly.io account with a payment method on file and **GPU
+access enabled** (Fly gates GPU machines behind a billing-verified
+flag). Install the `flyctl` CLI from
 [fly.io/docs/hands-on/install-flyctl](https://fly.io/docs/hands-on/install-flyctl/).
+
+The shipped `fly.toml` deploys to an **A10 GPU machine** (24 GB VRAM,
+~$1.50/hr while running, auto-suspends to ~$0 when idle). GPU is
+required: an earlier CPU-only deployment hit the wall on long-audio
+transcription regardless of memory tuning. The full rationale is in
+the `fly.toml` comment block.
+
+GPU machines are only available in a subset of Fly regions. As of
+2026-05, common GPU regions are `iad` (Ashburn), `ord` (Chicago),
+`lhr` (London), `nrt` (Tokyo), and `syd` (Sydney). Verify availability
+for your chosen region with `fly platform vm-sizes`.
 
 From the repo root:
 
@@ -193,15 +205,16 @@ with zero overhead.
 | `LLM_THREADS` | `0` (auto) | n_threads for CPU inference. |
 | `LLM_TEMPERATURE` | `0.2` | Sampling temperature. Low for consistent extraction. |
 | `LLM_MAX_OUTPUT_TOKENS` | `2048` | Cap on JSON output length. |
+| `LLM_N_GPU_LAYERS` | `-1` (all) | LLM layers offloaded to GPU. Set to `0` for CPU-only inference. Requires the CUDA build of llama-cpp-python (shipped in our Docker image). |
 
 ## Where the models live
 
 | Model | Source | Loaded |
 |-------|--------|--------|
-| **Parakeet TDT 0.6B** (transcription) | Baked into the Docker image at build time (~2 GB). | On disk the moment uvicorn binds. First-request transcription pays no download cost. |
-| **Qwen3.5-9B-Instruct Q4_K_M** (extraction) | Lazy-downloaded from HuggingFace on first request (~5.5 GB). Cached under `HF_HOME` so subsequent requests on the same Machine skip the network. | Each fresh Fly Machine pays a one-time ~1–2 min download cost on first `/analyze`; later requests reuse the cache. |
+| **Parakeet TDT 0.6B** (transcription) | Lazy-downloaded from HuggingFace on first request (~2 GB). | First request after a fresh Machine pays a ~30–60s download. NeMo then loads it onto the GPU. Subsequent requests reuse the cache. |
+| **Qwen3.5-9B-Instruct Q4_K_M** (extraction) | Lazy-downloaded from HuggingFace on first request (~5.5 GB). | First request after a fresh Machine pays a ~1–2 min download. llama-cpp-python then loads it onto the GPU. Subsequent requests reuse the cache. |
 
-The asymmetric strategy exists because Fly Machines cap rootfs at 8 GB; baking both models would push the image over the limit. Operators on hosts without that constraint can bake the Qwen GGUF too — see the commented-out `RUN` block in the `Dockerfile`.
+Both models are lazy-pulled rather than baked into the Docker image: the CUDA-enabled PyTorch and llama-cpp-python wheels already account for ~6 GB of image weight, and baking either model on top would push us over Fly's 8 GB rootfs cap. Once downloaded, the model weights persist on the Machine's local disk across auto-suspend/resume cycles, so the download cost is one-time per Machine instance (typically per deploy or per burst-scale event).
 
 ---
 

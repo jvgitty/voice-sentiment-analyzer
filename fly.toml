@@ -60,40 +60,43 @@ primary_region = "iad"  # Ashburn, VA. Change to e.g. "lhr", "fra", "sjc" as nee
     soft_limit = 1
 
 [[vm]]
-  # 8 shared CPUs + 16 GB RAM.
+  # A10 GPU machine. 1× NVIDIA A10 (24 GB VRAM), 8 dedicated CPUs,
+  # 32 GB system RAM.
   #
-  # v0.2 (post-pivot) memory budget:
+  # The shared-CPU experiment didn't work. v0.2's first deploy OOM'd
+  # the 16 GB shared-cpu-8x machine inside chunked Parakeet inference
+  # before Qwen even loaded — the same OOM pattern we'd been
+  # mitigating throughout v0.1.1 with malloc_trim + MALLOC_ARENA_MAX +
+  # chunking + cache eviction. The mitigations delay it but never
+  # eliminate it; on long audio the workload progressively consumes
+  # whatever memory the machine has.
   #
-  #   * Parakeet TDT 0.6B weights         ~2.0 GB (always resident)
-  #   * Parakeet chunked-inference peak   ~1.5 GB (transient per chunk)
-  #   * Qwen3.5-9B-Instruct Q4_K_M        ~5.5 GB (resident once loaded)
-  #   * Qwen KV cache + activations       ~1.0 GB (transient per request)
-  #   * Python / FastAPI / system         ~0.5 GB
-  #   * Safety margin                     ~5.5 GB
+  # GPU deployment sidesteps all of this. Parakeet's encoder
+  # activations and Qwen's weights move to VRAM where 24 GB is plenty
+  # of room for both, system RAM stays free for FastAPI / ffmpeg /
+  # audio buffers, and per-request wall clock drops from ~25-30 min
+  # (when it didn't OOM) to ~30-60 sec.
+  #
+  # VRAM budget on A10 (24 GB):
+  #   * Parakeet TDT 0.6B weights         ~1.5 GB (fp16 on GPU)
+  #   * Parakeet encoder activations      ~3.0 GB (per chunk, peak)
+  #   * Qwen3.5-9B-Instruct Q4_K_M        ~5.5 GB
+  #   * Qwen KV cache @ 8K context        ~1.5 GB
+  #   * Framework overhead                ~1.5 GB
   #   ────────────────────────────────────────────
-  #   Total                              ~16.0 GB
+  #   Total                              ~13 GB
+  #   Headroom                            ~11 GB
   #
-  # The v0.1.1 sentiment stack (NeMo + audeering wav2vec2 + SpeechBrain
-  # IEMOCAP) is gone — replaced by Parakeet + Qwen. The combined
-  # footprint is comparable but the failure mode is different: v0.1.1
-  # OOM'd at 7.89 GB inside Parakeet's whole-utterance encoder on long
-  # audio (now solved via chunked inference + malloc_trim), v0.2's
-  # peak is dominated by Qwen's resident weights.
+  # Auto-suspend still applies — we only pay GPU rates while a request
+  # is actively in flight (~30-60s typical). Steady-state idle cost is
+  # near zero. Hourly billed rate is ~$1.50/hr on A10 (Fly pricing as
+  # of 2026-05), so per-request cost is roughly $0.02-0.03.
   #
-  # shared-cpu-8x is the smallest Fly tier that exposes 16 GB. Going
-  # bigger requires performance-Nx, which roughly doubles per-second
-  # billing — not worth it unless we move to a larger model tier.
-  # auto_stop_machines = "suspend" keeps idle cost near zero; we only
-  # pay during the ~minutes a request is actually in flight.
-  #
-  # Tune lower (down to shared-cpu-4x / 8 GB) only after a future
-  # refactor materially cuts the LLM footprint — e.g. switching to a
-  # smaller 4B-class model in the "fast" tier described in
-  # docs/ROADMAP.md, or running Parakeet in a subprocess to fully
-  # release memory before the LLM phase loads.
-  cpu_kind = "shared"
-  cpus = 8
-  memory = "16gb"
+  # Tune up (L40S / A100) only if we move to a much bigger LLM tier
+  # or batch concurrent requests on a single machine. Tune down (off
+  # GPU back to shared-CPU) only if a smaller model + subprocess
+  # isolation experiment proves out — see docs/ROADMAP.md.
+  size = "a10"
 
 [deploy]
   # Roll back to the previous release on failed health checks rather

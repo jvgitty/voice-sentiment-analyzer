@@ -111,21 +111,26 @@ class TestLlmExtractorConfig:
     def test_constructor_reads_env_vars_with_defaults(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """All five tunable env vars (path, repo, file, context, threads)
-        flow into the LlmExtractor instance. Defaults apply when env
-        vars are unset; explicit values override. Constructor is still
-        cheap — no model load, no file IO."""
-        monkeypatch.delenv("LLM_MODEL_PATH", raising=False)
-        monkeypatch.delenv("LLM_GGUF_REPO", raising=False)
-        monkeypatch.delenv("LLM_GGUF_FILE", raising=False)
-        monkeypatch.delenv("LLM_CONTEXT_SIZE", raising=False)
-        monkeypatch.delenv("LLM_THREADS", raising=False)
+        """All tunable env vars flow into the LlmExtractor instance.
+        Defaults apply when env vars are unset; explicit values
+        override. Constructor is still cheap — no model load, no file
+        IO."""
+        for var in (
+            "LLM_MODEL_PATH",
+            "LLM_GGUF_REPO",
+            "LLM_GGUF_FILE",
+            "LLM_CONTEXT_SIZE",
+            "LLM_THREADS",
+            "LLM_N_GPU_LAYERS",
+        ):
+            monkeypatch.delenv(var, raising=False)
 
         from vsa.extraction.llm import (
             DEFAULT_CONTEXT_SIZE,
             DEFAULT_GGUF_FILE,
             DEFAULT_GGUF_REPO,
             DEFAULT_MODEL_PATH,
+            DEFAULT_N_GPU_LAYERS,
             DEFAULT_THREADS,
             LlmExtractor,
         )
@@ -136,6 +141,7 @@ class TestLlmExtractorConfig:
         assert e._gguf_file == DEFAULT_GGUF_FILE
         assert e._context_size == DEFAULT_CONTEXT_SIZE
         assert e._threads == DEFAULT_THREADS
+        assert e._n_gpu_layers == DEFAULT_N_GPU_LAYERS
         # No model loaded yet — construction is cheap.
         assert e._model is None
 
@@ -147,6 +153,7 @@ class TestLlmExtractorConfig:
         monkeypatch.setenv("LLM_GGUF_FILE", "my-quant.gguf")
         monkeypatch.setenv("LLM_CONTEXT_SIZE", "16384")
         monkeypatch.setenv("LLM_THREADS", "4")
+        monkeypatch.setenv("LLM_N_GPU_LAYERS", "20")
 
         from vsa.extraction.llm import LlmExtractor
 
@@ -156,6 +163,19 @@ class TestLlmExtractorConfig:
         assert e._gguf_file == "my-quant.gguf"
         assert e._context_size == 16384
         assert e._threads == 4
+        assert e._n_gpu_layers == 20
+
+    def test_n_gpu_layers_zero_is_cpu_only_signal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An explicit ``LLM_N_GPU_LAYERS=0`` means "force CPU." Useful
+        on dev machines without a CUDA build of llama-cpp-python, or
+        when debugging GPU vs CPU output divergence."""
+        monkeypatch.setenv("LLM_N_GPU_LAYERS", "0")
+        from vsa.extraction.llm import LlmExtractor
+
+        e = LlmExtractor()
+        assert e._n_gpu_layers == 0
 
     def test_invalid_int_env_var_falls_back_to_default(
         self, monkeypatch: pytest.MonkeyPatch
