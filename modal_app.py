@@ -103,9 +103,18 @@ image = (
         "faster-whisper>=1.0",
         "huggingface-hub>=0.24",
     )
-    # Our source code. The ``vsa`` package (src/vsa/) gets copied
-    # into the image and is importable inside the running container.
-    .add_local_python_source("vsa")
+    # Our source code. The ``vsa`` package lives at ``src/vsa/`` in
+    # the repo. We use ``add_local_dir`` (rather than
+    # ``add_local_python_source``) so Modal copies the files directly
+    # without needing the package to be pip-installed in the local
+    # Python — the latter would require ``pip install -e .`` against
+    # the full dep tree (NeMo + torch + llama-cpp-python) just to
+    # deploy, which is painful on Windows / non-CUDA hosts.
+    #
+    # Modal containers run from ``/root`` and have it on ``sys.path``
+    # by default, so copying to ``/root/vsa`` makes ``import vsa``
+    # work inside the container with no extra PYTHONPATH wiring.
+    .add_local_dir("src/vsa", remote_path="/root/vsa")
     # Default env vars. Operators can override any of these via the
     # Modal secret attached to the function below; values here are
     # the production defaults.
