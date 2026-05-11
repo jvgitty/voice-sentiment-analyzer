@@ -103,6 +103,21 @@ image = (
         "faster-whisper>=1.0",
         "huggingface-hub>=0.24",
     )
+    # Default env vars. Operators can override any of these via the
+    # Modal secret attached to the function below; values here are
+    # the production defaults. NOTE: must come BEFORE add_local_dir
+    # — Modal rejects any build step after a local-file step unless
+    # we opt in to copy=True (which forces a slow image rebuild on
+    # every source edit).
+    .env(
+        {
+            "HF_HOME": "/opt/hf-cache",
+            "LLM_MODEL_PATH": "/opt/models/qwen3.5-9b-instruct-q4_k_m.gguf",
+            "LLM_GGUF_REPO": "bartowski/Qwen_Qwen3.5-9B-Instruct-GGUF",
+            "LLM_GGUF_FILE": "Qwen_Qwen3.5-9B-Instruct-Q4_K_M.gguf",
+            "LLM_N_GPU_LAYERS": "-1",
+        }
+    )
     # Our source code. The ``vsa`` package lives at ``src/vsa/`` in
     # the repo. We use ``add_local_dir`` (rather than
     # ``add_local_python_source``) so Modal copies the files directly
@@ -114,19 +129,12 @@ image = (
     # Modal containers run from ``/root`` and have it on ``sys.path``
     # by default, so copying to ``/root/vsa`` makes ``import vsa``
     # work inside the container with no extra PYTHONPATH wiring.
+    #
+    # MUST be the last step in the image build — Modal optimizes
+    # local-file additions to happen on container start rather than
+    # at image-build time, which means no further build steps can
+    # follow.
     .add_local_dir("src/vsa", remote_path="/root/vsa")
-    # Default env vars. Operators can override any of these via the
-    # Modal secret attached to the function below; values here are
-    # the production defaults.
-    .env(
-        {
-            "HF_HOME": "/opt/hf-cache",
-            "LLM_MODEL_PATH": "/opt/models/qwen3.5-9b-instruct-q4_k_m.gguf",
-            "LLM_GGUF_REPO": "bartowski/Qwen_Qwen3.5-9B-Instruct-GGUF",
-            "LLM_GGUF_FILE": "Qwen_Qwen3.5-9B-Instruct-Q4_K_M.gguf",
-            "LLM_N_GPU_LAYERS": "-1",
-        }
-    )
 )
 
 # ---------------------------------------------------------------------------
