@@ -1,62 +1,60 @@
-"""Tests for the Pipeline orchestrator."""
+"""Tests for the Pipeline orchestrator (v0.2: transcription + extraction)."""
 
 from pathlib import Path
 
 import pytest
 
+from vsa.extraction.schema import ExtractionResult, Task
+from vsa.extraction.types import VoiceNoteType
 from vsa.pipeline import Pipeline
-from vsa.schema import (
-    CategoricalEmotion,
-    DimensionalEmotion,
-    EmotionResult,
-    Transcript,
-)
+from vsa.schema import Transcript, Word
 
 
 class _StubTranscriber:
     """Deterministic transcriber stub used by Pipeline tests so we don't
-    pay the ~12s NeMo model load on every pipeline assertion. The
-    ParakeetTranscriber smoke tests in test_transcription.py cover the
-    real-model path."""
+    pay the ~12s NeMo model load on every pipeline assertion. The real
+    Parakeet path is covered by tests/test_transcription.py."""
 
     def __init__(self, transcript: Transcript | None = None) -> None:
         self._transcript = transcript or Transcript(
             engine="parakeet-tdt-0.6b-v2",
             language="en",
-            text="",
-            words=[],
+            text="hello world",
+            words=[Word(w="hello", start=0.0, end=0.3, conf=0.9)],
         )
 
     def transcribe(self, audio_path: Path) -> Transcript:
         return self._transcript
 
 
-class _StubEmotionAnalyzer:
-    """Deterministic EmotionAnalyzer stub for Pipeline tests so we don't
-    load both wav2vec2 backbones on every pipeline assertion. The real-model
-    path is covered by the smoke tests in test_emotion.py."""
+class _StubExtractor:
+    """Deterministic LLM-extractor stub. Records the last extract()
+    call's args so tests can assert that the per-request voice-note
+    type override actually flowed from the API layer through the
+    Pipeline into the extractor."""
 
-    def __init__(self, result: EmotionResult | None = None) -> None:
-        self._result = result or EmotionResult(
-            dimensional=DimensionalEmotion(
-                model="audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim",
-                arousal=0.5,
-                valence=0.5,
-                dominance=0.5,
-            ),
-            categorical=CategoricalEmotion(
-                model="speechbrain/emotion-recognition-wav2vec2-IEMOCAP",
-                label="neutral",
-                scores={
-                    "neutral": 1.0,
-                    "happy": 0.0,
-                    "sad": 0.0,
-                    "angry": 0.0,
-                },
-            ),
+    def __init__(self, result: ExtractionResult | None = None) -> None:
+        self._result = result or ExtractionResult(
+            title="A stub title",
+            summary="A stub summary.",
+            type="idea",
+            tags=["stub-tag"],
         )
+        # Recorded args from the most recent call. None until called.
+        self.last_transcript: str | None = None
+        self.last_voice_note_types: list[VoiceNoteType] | None = None
+        self.last_fallback_type: str | None = None
 
-    def analyze(self, audio_path: Path) -> EmotionResult:
+    def extract(
+        self,
+        transcript: str,
+        voice_note_types: list[VoiceNoteType] | None = None,
+        fallback_type: str = "other",
+        summary_max_words: int = 50,
+    ) -> ExtractionResult:
+        self.last_transcript = transcript
+        self.last_voice_note_types = voice_note_types
+        self.last_fallback_type = fallback_type
         return self._result
 
 
@@ -67,481 +65,228 @@ class TestPipeline:
     ) -> None:
         pipeline = Pipeline(
             transcriber=_StubTranscriber(),
-            emotion_analyzer=_StubEmotionAnalyzer(),
+            extractor=_StubExtractor(),
         )
         result = await pipeline.analyze(fixture_wav_path)
 
-        assert result.schema_version == "1.0"
+        assert result.schema_version == "2.0"
         assert result.audio.sample_rate == 16000
         assert result.audio.channels == 1
         assert abs(result.audio.duration_seconds - 1.0) < 0.1
+
+    @pytest.mark.asyncio
+    async def test_analyze_populates_transcription_and_extraction(
+        self, fixture_wav_path: Path
+    ) -> None:
+        """Both feature stages run when transcription succeeds with
+        non-empty text. ``extraction`` is populated, ``processing.errors``
+        is empty."""
+        pipeline = Pipeline(
+            transcriber=_StubTranscriber(),
+            extractor=_StubExtractor(),
+        )
+        result = await pipeline.analyze(fixture_wav_path)
+
+        assert result.transcription is not None
+        assert result.transcription.text == "hello world"
+        assert result.extraction is not None
+        assert result.extraction.title == "A stub title"
+        assert result.processing.errors == []
 
     @pytest.mark.asyncio
     async def test_analyze_handles_m4a_input_via_internal_normalization(
         self, fixture_m4a_path: Path
     ) -> None:
         """Wiring tracer: an m4a file passed directly to Pipeline.analyze
-        must be normalized internally to a WAV the wave-based metadata
-        reader can handle, then flow through the rest of the pipeline.
-        Without this wiring the unit tests for normalize_audio pass but
-        production m4a uploads still fail at Pipeline.analyze's first
-        wave.open call."""
+        must be normalized internally to a WAV before the metadata read."""
         pipeline = Pipeline(
             transcriber=_StubTranscriber(),
-            emotion_analyzer=_StubEmotionAnalyzer(),
+            extractor=_StubExtractor(),
         )
         result = await pipeline.analyze(fixture_m4a_path)
 
-        # The audio metadata reflects the post-normalization WAV
-        # (16 kHz mono), not the original m4a's encoded properties.
-        assert result.schema_version == "1.0"
+        assert result.schema_version == "2.0"
         assert result.audio.sample_rate == 16000
         assert result.audio.channels == 1
         assert abs(result.audio.duration_seconds - 1.0) < 0.2
-
-        # Slices 2+3+4+5+6+7 wire up every section; windows is now a
-        # non-empty list of WindowMetrics covering the full audio.
-        from vsa.schema import WindowMetrics
-
         assert result.transcription is not None
-        assert result.acoustic is not None
-        assert result.emotion is not None
-        assert result.prosody is not None
-        assert result.composite is not None
-        assert isinstance(result.windows, list)
-        assert len(result.windows) >= 1
-        assert all(isinstance(w, WindowMetrics) for w in result.windows)
-
-        # processing block is populated and errors[] is empty
-        assert result.processing.errors == []
-        assert result.processing.completed_at >= result.processing.started_at
-        assert isinstance(result.processing.library_versions, dict)
-
-
-    @pytest.mark.asyncio
-    async def test_analyze_populates_acoustic_section(
-        self, fixture_wav_path: Path
-    ) -> None:
-        """Pipeline.analyze runs AcousticAnalyzer and merges its output."""
-        pipeline = Pipeline(
-            transcriber=_StubTranscriber(),
-            emotion_analyzer=_StubEmotionAnalyzer(),
-        )
-        result = await pipeline.analyze(fixture_wav_path)
-
-        assert result.acoustic is not None
-        assert result.processing.errors == []
-        # Sanity: the wired-in AcousticFeatures should reflect the 440 Hz
-        # fixture, not stub zeros.
-        assert 380.0 <= result.acoustic.pitch.mean_hz <= 500.0
-
-
-    @pytest.mark.asyncio
-    async def test_analyze_populates_transcription_section(
-        self, fixture_wav_path: Path
-    ) -> None:
-        """Pipeline.analyze runs the injected Transcriber and merges its
-        output into result.transcription."""
-        stub = _StubTranscriber(
-            Transcript(
-                engine="parakeet-tdt-0.6b-v2",
-                language="en",
-                text="hello world",
-                words=[],
-            )
-        )
-        pipeline = Pipeline(
-            transcriber=stub,
-            emotion_analyzer=_StubEmotionAnalyzer(),
-        )
-        result = await pipeline.analyze(fixture_wav_path)
-
-        assert result.transcription is not None
-        assert result.transcription.engine == "parakeet-tdt-0.6b-v2"
-        assert result.transcription.language == "en"
-        assert result.transcription.text == "hello world"
+        assert result.extraction is not None
         assert result.processing.errors == []
 
-
     @pytest.mark.asyncio
-    async def test_transcription_failure_sets_none_and_logs_error(
+    async def test_transcription_failure_skips_extraction(
         self, fixture_wav_path: Path
     ) -> None:
-        """Partial-success contract: a flaky Transcriber must not 500 the
-        whole pipeline. transcription becomes None, an entry is appended to
-        processing.errors, and other sections (acoustic) still populate."""
+        """When transcription raises, the pipeline must not call the
+        extractor at all — there's nothing to extract from. The
+        partial-success contract leaves both fields ``None`` and
+        records the transcription error."""
 
         class BoomTranscriber:
             def transcribe(self, audio_path: Path) -> Transcript:
                 raise RuntimeError("synthetic transcription failure")
 
+        extractor = _StubExtractor()
         pipeline = Pipeline(
             transcriber=BoomTranscriber(),
-            emotion_analyzer=_StubEmotionAnalyzer(),
+            extractor=extractor,
         )
         result = await pipeline.analyze(fixture_wav_path)
 
         assert result.transcription is None
+        assert result.extraction is None
+        # Critical: the extractor was never invoked.
+        assert extractor.last_transcript is None
         assert any(
-            "transcription" in err.lower() and "synthetic" in err
-            for err in result.processing.errors
+            "transcription" in err.lower() for err in result.processing.errors
         ), result.processing.errors
-        # Other sections continue running.
-        assert result.acoustic is not None
-
 
     @pytest.mark.asyncio
-    async def test_transcription_failure_skips_prosody_and_logs_error(
+    async def test_empty_transcript_skips_extraction(
         self, fixture_wav_path: Path
     ) -> None:
-        """When transcription returns None, prosody has no input and must be
-        None. A dedicated 'prosody skipped' error is appended so the caller
-        can tell prosody-was-skipped apart from transcription-failed."""
-
-        class BoomTranscriber:
-            def transcribe(self, audio_path: Path) -> Transcript:
-                raise RuntimeError("synthetic transcription failure")
-
+        """A transcript with empty/whitespace-only text is functionally
+        a transcription failure for the LLM — skip extraction rather
+        than burning a 30s LLM call to extract from nothing. The
+        pipeline must not raise; ``extraction`` is just ``None``."""
+        silent = Transcript(
+            engine="parakeet-tdt-0.6b-v2",
+            language="en",
+            text="   \n  ",
+            words=[],
+        )
+        extractor = _StubExtractor()
         pipeline = Pipeline(
-            transcriber=BoomTranscriber(),
-            emotion_analyzer=_StubEmotionAnalyzer(),
+            transcriber=_StubTranscriber(silent),
+            extractor=extractor,
         )
         result = await pipeline.analyze(fixture_wav_path)
 
-        assert result.transcription is None
-        assert result.prosody is None
-        assert any(
-            "prosody" in err.lower() and "transcription" in err.lower()
-            for err in result.processing.errors
-        ), result.processing.errors
-        # Other sections continue running.
-        assert result.acoustic is not None
-        assert result.emotion is not None
-
+        assert result.transcription is not None  # transcript exists
+        assert result.extraction is None  # but nothing to extract from
+        assert extractor.last_transcript is None  # extractor not called
 
     @pytest.mark.asyncio
-    async def test_acoustic_failure_sets_none_and_logs_error(
-        self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
+    async def test_extraction_failure_records_error_without_failing_request(
+        self, fixture_wav_path: Path
     ) -> None:
-        """Partial-success contract: a flaky AcousticAnalyzer must not 500
-        the whole pipeline. The section becomes None and an entry is appended
-        to processing.errors."""
-        from vsa.features.acoustic import AcousticAnalyzer
+        """Partial-success contract: when the LLM fails on a valid
+        transcript, the request still ``completes`` — the transcript
+        itself is a useful deliverable. ``extraction`` becomes ``None``,
+        an entry is appended to ``processing.errors``, and the API
+        layer (covered by test_api.py) emits status=completed because
+        ``transcription is not None``."""
 
-        def boom(self, audio_path: Path) -> None:
-            raise RuntimeError("synthetic acoustic failure")
-
-        monkeypatch.setattr(AcousticAnalyzer, "analyze", boom)
+        class BoomExtractor:
+            def extract(
+                self,
+                transcript: str,
+                voice_note_types=None,
+                fallback_type: str = "other",
+                summary_max_words: int = 50,
+            ) -> ExtractionResult:
+                raise RuntimeError("synthetic extraction failure")
 
         pipeline = Pipeline(
             transcriber=_StubTranscriber(),
-            emotion_analyzer=_StubEmotionAnalyzer(),
+            extractor=BoomExtractor(),
         )
         result = await pipeline.analyze(fixture_wav_path)
 
-        assert result.acoustic is None
-        assert len(result.processing.errors) == 1
-        assert "acoustic" in result.processing.errors[0].lower()
-        assert "synthetic" in result.processing.errors[0]
-
-
-    @pytest.mark.asyncio
-    async def test_analyze_populates_emotion_section(
-        self, fixture_wav_path: Path
-    ) -> None:
-        """Pipeline.analyze runs EmotionAnalyzer and merges its output into
-        result.emotion. Stubbed to keep the test fast — the real-model path
-        is covered by the EmotionAnalyzer smoke tests in test_emotion.py."""
-        stub = _StubEmotionAnalyzer(
-            EmotionResult(
-                dimensional=DimensionalEmotion(
-                    model="audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim",
-                    arousal=0.42,
-                    valence=0.58,
-                    dominance=0.61,
-                ),
-                categorical=CategoricalEmotion(
-                    model="speechbrain/emotion-recognition-wav2vec2-IEMOCAP",
-                    label="happy",
-                    scores={
-                        "neutral": 0.1,
-                        "happy": 0.7,
-                        "sad": 0.1,
-                        "angry": 0.1,
-                    },
-                ),
-            )
-        )
-        pipeline = Pipeline(
-            transcriber=_StubTranscriber(), emotion_analyzer=stub
-        )
-        result = await pipeline.analyze(fixture_wav_path)
-
-        assert result.emotion is not None
-        assert result.emotion.dimensional is not None
-        assert result.emotion.dimensional.arousal == pytest.approx(0.42)
-        assert result.emotion.categorical is not None
-        assert result.emotion.categorical.label == "happy"
-        assert result.processing.errors == []
-
+        assert result.transcription is not None
+        assert result.extraction is None
+        assert any(
+            "extraction" in err.lower() and "synthetic" in err
+            for err in result.processing.errors
+        ), result.processing.errors
 
     @pytest.mark.asyncio
-    async def test_analyze_populates_prosody_section(
+    async def test_voice_note_types_override_flows_to_extractor(
         self, fixture_wav_path: Path
     ) -> None:
-        """Pipeline.analyze runs ProsodyAnalyzer when transcription succeeds.
-
-        Even with a stub transcript that has no words (the shape Slice 3's
-        sine-wave fixture produces today), prosody should populate with
-        zero-valued fields rather than being None."""
-        from vsa.schema import ProsodyFeatures
-
+        """Per-request override of the voice-note type catalog must
+        reach the extractor verbatim. This is the integration point for
+        clients with their own taxonomies (the v2 multi-tenant story
+        builds on this primitive)."""
+        custom = [
+            VoiceNoteType(
+                name="legal-call",
+                description="Summary of a call with a legal client.",
+            ),
+        ]
+        extractor = _StubExtractor()
         pipeline = Pipeline(
             transcriber=_StubTranscriber(),
-            emotion_analyzer=_StubEmotionAnalyzer(),
+            extractor=extractor,
         )
-        result = await pipeline.analyze(fixture_wav_path)
+        await pipeline.analyze(
+            fixture_wav_path, voice_note_types=custom
+        )
 
-        assert isinstance(result.prosody, ProsodyFeatures)
-        assert result.prosody.speaking_rate_wpm == 0.0
-        assert result.prosody.pause_count == 0
-        assert result.prosody.filler_rate == 0.0
-        assert result.processing.errors == []
-
+        assert extractor.last_voice_note_types is not None
+        assert len(extractor.last_voice_note_types) == 1
+        assert extractor.last_voice_note_types[0].name == "legal-call"
 
     @pytest.mark.asyncio
-    async def test_live_parakeet_transcriber_pipeline_populates_prosody(
+    async def test_no_voice_note_types_override_means_extractor_uses_defaults(
         self, fixture_wav_path: Path
     ) -> None:
-        """End-to-end run with the real ParakeetTranscriber to de-risk
-        Slice 3's word-timestamp parsing.
+        """When the caller omits ``voice_note_types``, the pipeline
+        passes ``None`` to the extractor. The extractor (not the
+        pipeline) is responsible for falling back to the default
+        catalog — this keeps the default-catalog source-of-truth in
+        one place."""
+        extractor = _StubExtractor()
+        pipeline = Pipeline(
+            transcriber=_StubTranscriber(),
+            extractor=extractor,
+        )
+        await pipeline.analyze(fixture_wav_path)
 
-        The 1-second 440 Hz sine fixture transcribes to gibberish at best
-        (often an empty word list). We assert only:
-          1. Pipeline.analyze does not crash on the real transcribe path.
-          2. result.prosody populates (i.e. ProsodyFeatures, not None) —
-             the transcript shape produced by Slice 3 is consumable by
-             ProsodyAnalyzer without raising.
-          3. Numeric fields are sane (non-negative, no NaN).
+        assert extractor.last_voice_note_types is None
 
-        If the fixture ever produces *non-empty* words and the prosody
-        section gets weird (e.g. negative speaking rate, NaN pauses), that
-        signals Slice 3's word-timestamp key-handling needs review."""
+    @pytest.mark.asyncio
+    async def test_transcript_text_is_what_reaches_the_extractor(
+        self, fixture_wav_path: Path
+    ) -> None:
+        """The extractor receives the transcript's ``.text`` field, not
+        the word-level list. A future schema change that moves text out
+        of that field should fail this test loudly."""
+        transcript = Transcript(
+            engine="parakeet-tdt-0.6b-v2",
+            language="en",
+            text="something specific to assert on",
+            words=[],
+        )
+        extractor = _StubExtractor()
+        pipeline = Pipeline(
+            transcriber=_StubTranscriber(transcript),
+            extractor=extractor,
+        )
+        await pipeline.analyze(fixture_wav_path)
+
+        assert extractor.last_transcript == "something specific to assert on"
+
+
+class TestPipelineLiveTranscriber:
+    """End-to-end run with the real ParakeetTranscriber + a stub
+    extractor. De-risks the word-timestamp parsing path after the
+    pivot strip — proves the live-model wiring still holds."""
+
+    @pytest.mark.asyncio
+    async def test_live_parakeet_pipeline_runs_end_to_end(
+        self, fixture_wav_path: Path
+    ) -> None:
         from vsa.transcription.parakeet import ParakeetTranscriber
-        from vsa.schema import ProsodyFeatures
 
         pipeline = Pipeline(
             transcriber=ParakeetTranscriber(),
-            emotion_analyzer=_StubEmotionAnalyzer(),
+            extractor=_StubExtractor(),
         )
         result = await pipeline.analyze(fixture_wav_path)
 
-        # No crash, prosody populated.
-        assert isinstance(result.prosody, ProsodyFeatures)
-        assert result.transcription is not None
-
-        # Sanity ranges. None of these should ever go negative regardless
-        # of what the real model emitted.
-        assert result.prosody.speaking_rate_wpm >= 0.0
-        assert result.prosody.speaking_rate_sps >= 0.0
-        assert result.prosody.pause_count >= 0
-        assert result.prosody.pause_total_seconds >= 0.0
-        assert result.prosody.pause_mean_seconds >= 0.0
-        assert 0.0 <= result.prosody.filler_rate <= 1.0
-
-
-    @pytest.mark.asyncio
-    async def test_composite_scorer_failure_sets_none_and_logs_error(
-        self,
-        fixture_wav_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Partial-success contract: when CompositeScorer.score raises (e.g.
-        a config bug or a registry mismatch), Pipeline.analyze sets
-        result.composite to None and appends an entry to
-        processing.errors. Other sections still populate."""
-        from vsa.composites import CompositeScorer
-
-        def boom(self: CompositeScorer, inputs, *args, **kwargs) -> None:
-            # *args/**kwargs swallow Slice 7's overrides= kwarg without
-            # this stub having to know about it.
-            raise RuntimeError("synthetic composite failure")
-
-        monkeypatch.setattr(CompositeScorer, "score", boom)
-
-        pipeline = Pipeline(
-            transcriber=_StubTranscriber(),
-            emotion_analyzer=_StubEmotionAnalyzer(),
-        )
-        result = await pipeline.analyze(fixture_wav_path)
-
-        assert result.composite is None
-        assert any(
-            "composite" in err.lower() and "synthetic" in err
-            for err in result.processing.errors
-        ), result.processing.errors
-        # Other sections continue running.
-        assert result.acoustic is not None
-        assert result.transcription is not None
-        assert result.emotion is not None
-        assert result.prosody is not None
-
-
-    @pytest.mark.asyncio
-    async def test_analyze_populates_composite_section(
-        self, fixture_wav_path: Path
-    ) -> None:
-        """Pipeline.analyze runs CompositeScorer last and merges its
-        output. With acoustic+prosody+emotion all populated, every
-        composite should score successfully and the section should be a
-        CompositeScores."""
-        from vsa.composites import CompositeScores
-
-        pipeline = Pipeline(
-            transcriber=_StubTranscriber(),
-            emotion_analyzer=_StubEmotionAnalyzer(),
-        )
-        result = await pipeline.analyze(fixture_wav_path)
-
-        assert isinstance(result.composite, CompositeScores)
-        assert result.composite.confidence is not None
-        assert result.composite.engagement is not None
-        assert result.composite.calmness is not None
-        assert 0.0 <= result.composite.confidence <= 1.0
-        assert 0.0 <= result.composite.engagement <= 1.0
-        assert 0.0 <= result.composite.calmness <= 1.0
-        assert result.processing.errors == []
-
-
-    @pytest.mark.asyncio
-    async def test_windowed_failure_sets_windows_none_and_logs_error(
-        self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Partial-success contract: when WindowedAnalyzer.analyze raises,
-        result.windows is None, an entry is appended to processing.errors,
-        and every other section (acoustic / transcription / emotion /
-        prosody / composite) still populates."""
-        from vsa.windowed import WindowedAnalyzer
-
-        def boom(self, **kwargs) -> None:
-            raise RuntimeError("synthetic windowed failure")
-
-        monkeypatch.setattr(WindowedAnalyzer, "analyze", boom)
-
-        pipeline = Pipeline(
-            transcriber=_StubTranscriber(),
-            emotion_analyzer=_StubEmotionAnalyzer(),
-        )
-        result = await pipeline.analyze(fixture_wav_path)
-
-        assert result.windows is None
-        assert any(
-            "window" in err.lower() and "synthetic" in err
-            for err in result.processing.errors
-        ), result.processing.errors
-        # Other sections continue running.
-        assert result.acoustic is not None
-        assert result.transcription is not None
-        assert result.emotion is not None
-        assert result.prosody is not None
-        assert result.composite is not None
-
-
-    @pytest.mark.asyncio
-    async def test_evict_between_phases_releases_transcriber_and_categorical(
-        self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Memory-eviction contract: by default Pipeline.analyze must call
-        ``release()`` on the transcriber after the transcription phase and
-        ``release_categorical()`` on the emotion analyzer after the
-        whole-audio emotion phase. Without this, the OOMs observed during
-        v0.1.1 smoke testing recur on machines smaller than 16 GB."""
-        monkeypatch.delenv("VSA_EVICT_BETWEEN_PHASES", raising=False)
-
-        release_calls: list[str] = []
-
-        class RecordingTranscriber(_StubTranscriber):
-            def release(self) -> None:
-                release_calls.append("transcriber")
-
-        class RecordingEmotion(_StubEmotionAnalyzer):
-            def release_categorical(self) -> None:
-                release_calls.append("categorical")
-
-        pipeline = Pipeline(
-            transcriber=RecordingTranscriber(),
-            emotion_analyzer=RecordingEmotion(),
-        )
-        await pipeline.analyze(fixture_wav_path)
-
-        assert release_calls == ["transcriber", "categorical"]
-
-    @pytest.mark.asyncio
-    async def test_evict_between_phases_can_be_disabled_via_env(
-        self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """``VSA_EVICT_BETWEEN_PHASES=0`` opts out of the eviction. Useful
-        for benchmarking many requests in a single warm process, where
-        the per-request reload cost dominates the memory savings."""
-        monkeypatch.setenv("VSA_EVICT_BETWEEN_PHASES", "0")
-
-        release_calls: list[str] = []
-
-        class RecordingTranscriber(_StubTranscriber):
-            def release(self) -> None:
-                release_calls.append("transcriber")
-
-        class RecordingEmotion(_StubEmotionAnalyzer):
-            def release_categorical(self) -> None:
-                release_calls.append("categorical")
-
-        pipeline = Pipeline(
-            transcriber=RecordingTranscriber(),
-            emotion_analyzer=RecordingEmotion(),
-        )
-        await pipeline.analyze(fixture_wav_path)
-
-        assert release_calls == []
-
-    @pytest.mark.asyncio
-    async def test_evict_between_phases_skips_stubs_without_release(
-        self, fixture_wav_path: Path
-    ) -> None:
-        """Eviction is opt-in per analyzer: stubs without release()/
-        release_categorical() must not crash the pipeline. This keeps
-        the existing test suite (and any external callers using the
-        Transcriber Protocol's narrow contract) working."""
-        pipeline = Pipeline(
-            transcriber=_StubTranscriber(),
-            emotion_analyzer=_StubEmotionAnalyzer(),
-        )
-        result = await pipeline.analyze(fixture_wav_path)
-
-        assert result.processing.errors == []
-
-    @pytest.mark.asyncio
-    async def test_emotion_failure_sets_none_and_logs_error(
-        self, fixture_wav_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Partial-success contract: when the entire EmotionAnalyzer.analyze
-        raises (not just one inner model — that's handled inside the
-        analyzer), Pipeline.analyze sets result.emotion = None and appends
-        an entry to processing.errors. Other sections still populate."""
-        from vsa.features.emotion import EmotionAnalyzer
-
-        def boom(self: EmotionAnalyzer, audio_path: Path) -> None:
-            raise RuntimeError("synthetic emotion failure")
-
-        monkeypatch.setattr(EmotionAnalyzer, "analyze", boom)
-
-        pipeline = Pipeline(transcriber=_StubTranscriber())
-        result = await pipeline.analyze(fixture_wav_path)
-
-        assert result.emotion is None
-        assert any(
-            "emotion" in err.lower() and "synthetic" in err
-            for err in result.processing.errors
-        ), result.processing.errors
-        # Other sections continue running.
-        assert result.acoustic is not None
+        # Transcription must populate. The text may be empty (the
+        # 1-second sine fixture transcribes to gibberish at best);
+        # whether extraction runs depends on whether the model
+        # produced non-empty text. Both outcomes are valid here.
         assert result.transcription is not None

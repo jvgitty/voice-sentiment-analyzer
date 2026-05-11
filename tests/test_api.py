@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -111,7 +112,7 @@ class TestAnalyzeEndpoint:
 
             assert response.status_code == 200
             payload = response.json()
-            assert payload["schema_version"] == "1.0"
+            assert payload["schema_version"] == "2.0"
             assert payload["audio"]["sample_rate"] == 16000
 
             assert callback_route.call_count == 1
@@ -128,7 +129,98 @@ class TestAnalyzeEndpoint:
             assert decoded["request_id"] == "req-1"
             assert decoded["status"] == "completed"
             assert decoded["metadata"] == {"note_id": "abc"}
-            assert decoded["result"]["schema_version"] == "1.0"
+            assert decoded["result"]["schema_version"] == "2.0"
+
+    def test_voice_note_types_override_flows_to_pipeline(
+        self, client: TestClient, fixture_wav_bytes: bytes
+    ) -> None:
+        """A request that includes ``voice_note_types`` in the body
+        must validate and the pipeline must receive the override. This
+        is the integration point clients use for custom taxonomies."""
+        audio_url = "https://example.test/audio.wav"
+        callback_url = "https://example.test/callback"
+
+        # Capture what the pipeline actually receives so we can assert
+        # the override flowed through end-to-end.
+        captured: dict[str, Any] = {}
+
+        class _CapturingPipeline:
+            async def analyze(
+                self,
+                audio_path: Path,
+                voice_note_types=None,
+            ) -> AnalyzeResult:
+                captured["voice_note_types"] = voice_note_types
+                now = datetime.now(timezone.utc)
+                from vsa.schema import Transcript
+
+                return AnalyzeResult(
+                    audio=AudioInfo(
+                        duration_seconds=1.0,
+                        sample_rate=16000,
+                        channels=1,
+                    ),
+                    transcription=Transcript(
+                        engine="parakeet-tdt-0.6b-v2",
+                        language="en",
+                        text="hello",
+                        words=[],
+                    ),
+                    extraction=None,
+                    processing=ProcessingInfo(
+                        started_at=now,
+                        completed_at=now,
+                    ),
+                )
+
+        app.dependency_overrides[_pipeline] = lambda: _CapturingPipeline()
+        try:
+            with respx.mock(assert_all_called=True) as mocker:
+                mocker.get(audio_url).mock(
+                    return_value=httpx.Response(
+                        200,
+                        headers={
+                            "Content-Type": "audio/wav",
+                            "Content-Length": str(len(fixture_wav_bytes)),
+                        },
+                        content=fixture_wav_bytes,
+                    )
+                )
+                mocker.post(callback_url).mock(
+                    return_value=httpx.Response(204)
+                )
+
+                response = client.post(
+                    "/analyze",
+                    json={
+                        "audio_url": audio_url,
+                        "callback_url": callback_url,
+                        "callback_secret": "shared-secret-1234567890abcdef",
+                        "metadata": {},
+                        "request_id": "req-types",
+                        "voice_note_types": [
+                            {
+                                "name": "legal-call",
+                                "description": "A summary of a legal call.",
+                            },
+                            {
+                                "name": "case-note",
+                                "description": "An observation on a case.",
+                            },
+                        ],
+                    },
+                    headers={"Authorization": "Bearer test-key"},
+                )
+
+                assert response.status_code == 200, response.text
+                # The pipeline saw the override exactly as posted.
+                assert captured["voice_note_types"] is not None
+                names = [
+                    t.name for t in captured["voice_note_types"]
+                ]
+                assert names == ["legal-call", "case-note"]
+        finally:
+            app.dependency_overrides.pop(_pipeline, None)
 
     def test_null_transcription_fires_failed_status_callback(
         self, client: TestClient, fixture_wav_bytes: bytes
@@ -144,7 +236,11 @@ class TestAnalyzeEndpoint:
         secret = "shared-secret-1234567890abcdef"
 
         class _NullTranscriptPipeline:
-            async def analyze(self, audio_path: Path) -> AnalyzeResult:
+            async def analyze(
+                self,
+                audio_path: Path,
+                voice_note_types=None,
+            ) -> AnalyzeResult:
                 now = datetime.now(timezone.utc)
                 return AnalyzeResult(
                     audio=AudioInfo(

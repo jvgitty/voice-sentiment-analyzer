@@ -4,9 +4,9 @@
 The 0.6B model weighs roughly 2GB on disk and several seconds to load.
 Construction is therefore cheap and side-effect free — the model is pulled
 into memory only on the first call to :meth:`transcribe`. This matches the
-lazy pattern used by ``AcousticAnalyzer`` and lets the pipeline be
-constructed (e.g. for FastAPI app startup) without paying the load cost
-when no audio is being analyzed.
+lazy pattern that lets the pipeline be constructed (e.g. for FastAPI
+app startup) without paying the load cost when no audio is being
+analyzed.
 
 Chunked inference for long audio
 --------------------------------
