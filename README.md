@@ -18,6 +18,12 @@ The same Python core runs two ways: a FastAPI HTTP service deployed
 on Modal (the production interface) and a `vsa analyze` CLI for
 local one-shot use.
 
+For history on what was tried and removed before landing here (the
+acoustic + emotion + prosody + composite-scoring stack from v0.1.x,
+the Fly deployment that didn't fit the workload, the pivot
+sequence), see [`deprecated/`](deprecated/) — reference-only docs
+that don't reflect current code.
+
 ---
 
 ## Sample request and response
