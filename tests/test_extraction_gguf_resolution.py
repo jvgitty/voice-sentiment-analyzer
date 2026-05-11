@@ -77,13 +77,13 @@ class TestResolveGgufPath:
 
         resolved = llm_module._resolve_gguf_path(
             model_path=str(tmp_path / "does-not-exist.gguf"),
-            gguf_repo="bartowski/Qwen_Qwen3.5-9B-Instruct-GGUF",
-            gguf_file="Qwen_Qwen3.5-9B-Instruct-Q4_K_M.gguf",
+            gguf_repo="Smoffyy/Qwen3.5-9B-Instruct-Pure-GGUF",
+            gguf_file="Qwen3.5-9B-Q4_K_M.gguf",
         )
 
         assert resolved == str(downloaded_path)
-        assert called_with["repo_id"] == "bartowski/Qwen_Qwen3.5-9B-Instruct-GGUF"
-        assert called_with["filename"] == "Qwen_Qwen3.5-9B-Instruct-Q4_K_M.gguf"
+        assert called_with["repo_id"] == "Smoffyy/Qwen3.5-9B-Instruct-Pure-GGUF"
+        assert called_with["filename"] == "Qwen3.5-9B-Q4_K_M.gguf"
 
     def test_empty_model_path_falls_through_to_download(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

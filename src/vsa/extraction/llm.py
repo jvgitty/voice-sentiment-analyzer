@@ -77,8 +77,14 @@ from vsa.extraction.types import DEFAULT_FALLBACK_TYPE, VoiceNoteType
 
 
 DEFAULT_MODEL_PATH = "/opt/models/qwen3.5-9b-instruct-q4_k_m.gguf"
-DEFAULT_GGUF_REPO = "bartowski/Qwen_Qwen3.5-9B-Instruct-GGUF"
-DEFAULT_GGUF_FILE = "Qwen_Qwen3.5-9B-Instruct-Q4_K_M.gguf"
+# Smoffyy's "Pure GGUF" — direct quantization from the official
+# Qwen/Qwen3.5-9B weights with no modifications. Apache 2.0.
+# bartowski / lmstudio-community do not yet have Qwen3.5-9B-Instruct
+# GGUF builds as of 2026-05; this is the most established vanilla
+# quant. Note: the file is named ``Qwen3.5-9B-Q4_K_M.gguf`` (no
+# ``-Instruct``) even though the repo name has it.
+DEFAULT_GGUF_REPO = "Smoffyy/Qwen3.5-9B-Instruct-Pure-GGUF"
+DEFAULT_GGUF_FILE = "Qwen3.5-9B-Q4_K_M.gguf"
 DEFAULT_CONTEXT_SIZE = 8192
 DEFAULT_THREADS = 0  # 0 = let llama.cpp auto-detect
 DEFAULT_TEMPERATURE = 0.2
