@@ -264,8 +264,8 @@ with zero overhead.
 | `MAX_AUDIO_BYTES` | `52428800` (50 MB) | Reject oversized audio uploads early |
 | `HF_HOME` | `/opt/hf-cache` | Model cache location (Parakeet + lazy-pulled GGUFs) |
 | `LLM_MODEL_PATH` | `/opt/models/qwen3.5-9b-instruct-q4_k_m.gguf` | Local GGUF path. If the file exists, used directly; otherwise the lazy-download path below kicks in. |
-| `LLM_GGUF_REPO` | `bartowski/Qwen_Qwen3.5-9B-Instruct-GGUF` | HuggingFace repo for the lazy-download fallback. |
-| `LLM_GGUF_FILE` | `Qwen_Qwen3.5-9B-Instruct-Q4_K_M.gguf` | GGUF filename inside the repo. |
+| `LLM_GGUF_REPO` | `Smoffyy/Qwen3.5-9B-Instruct-Pure-GGUF` | HuggingFace repo for the lazy-download fallback. |
+| `LLM_GGUF_FILE` | `Qwen3.5-9B-Q4_K_M.gguf` | GGUF filename inside the repo. |
 | `LLM_CONTEXT_SIZE` | `8192` | LLM context window in tokens. |
 | `LLM_THREADS` | `0` (auto) | n_threads for CPU inference. |
 | `LLM_TEMPERATURE` | `0.2` | Sampling temperature. Low for consistent extraction. |
