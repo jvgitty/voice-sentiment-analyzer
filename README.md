@@ -1,20 +1,22 @@
 # Voice Note Transcription
 
-Local voice-note transcription service. POST a signed audio URL, get
-back a transcript with word-level timestamps. CPU-only, stateless,
-scale-to-zero on Fly.io. Audio lives in `/tmp` during processing and is
-deleted when the request completes — the service never stores anything.
+Local voice-note transcription + LLM extraction service. POST a signed
+audio URL, get back a transcript with word-level timestamps PLUS a
+structured JSON extraction (title, summary, type, tags, entities,
+tasks). GPU-accelerated, stateless, auto-scales to zero. Audio lives
+in `/tmp` during processing and is deleted when the request completes
+— the service never stores anything.
 
-> **v0.2 status.** This service pivoted in May 2026 from voice
-> sentiment analysis (the v0.1.1 archive, retrievable via the
-> `v0.1.1-archived-sentiment` git tag) to transcription-only. The next
-> phase adds a local LLM extraction layer (tags, entities, tasks,
-> summary) using Qwen3.5-9B-Instruct. See [`docs/ROADMAP.md`](docs/ROADMAP.md)
-> for the v2 plan.
+> **v0.2 status.** The May 2026 pivot from voice sentiment analysis
+> (archived under `v0.1.1-archived-sentiment` tag) is complete. The
+> service now runs on Modal's T4 GPU with Parakeet TDT 0.6B for
+> transcription and Qwen3.5-9B-Instruct for structured extraction.
+> See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's planned for v2
+> (multi-tenant client config, BAA paths, model tiers).
 
-The same Python core runs three ways: a FastAPI HTTP service (the
-production interface), a `vsa analyze` CLI for local debugging, and
-`from vsa import Pipeline` for tests and library use.
+The same Python core runs two ways: a FastAPI HTTP service deployed
+on Modal (the production interface) and a `vsa analyze` CLI for
+local one-shot use.
 
 ---
 
@@ -129,74 +131,11 @@ the org-level plan does.
 
 ---
 
-## Legacy reference: Deploy to Fly.io
+## Run locally (CLI)
 
-> The original deployment target was Fly.io. We pivoted to Modal in
-> 2026-05 after the shared-CPU machines couldn't hold Parakeet's
-> memory profile on long audio and Fly's GPU offering wasn't
-> available to new customers. The `Dockerfile` and `fly.toml` are
-> preserved in the repo as documentation; they are no longer the
-> deployment path.
-
-You'll need a Fly.io account with a payment method on file and **GPU
-access enabled** (Fly gates GPU machines behind a billing-verified
-flag). Install the `flyctl` CLI from
-[fly.io/docs/hands-on/install-flyctl](https://fly.io/docs/hands-on/install-flyctl/).
-
-The shipped `fly.toml` deploys to an **A10 GPU machine** (24 GB VRAM,
-~$1.50/hr while running, auto-suspends to ~$0 when idle).
-
-GPU machines are only available in a subset of Fly regions. As of
-2026-05, common GPU regions are `iad` (Ashburn), `ord` (Chicago),
-`lhr` (London), `nrt` (Tokyo), and `syd` (Sydney). Verify availability
-for your chosen region with `fly platform vm-sizes`.
-
-From the repo root:
-
-```bash
-# 1. Authenticate (opens a browser).
-fly auth login
-
-# 2. Create the app from the shipped fly.toml.
-fly launch --no-deploy --name <your-unique-app-name> --region iad
-
-# 3. Set the inbound API key. Generate a random one:
-fly secrets set API_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
-
-# (Optional) override transcription engine. Default is Parakeet.
-# fly secrets set TRANSCRIBER_ENGINE=whisper WHISPER_MODEL=small
-
-# 4. Deploy.
-fly deploy
-
-# 5. Smoke test:
-curl -X POST https://<your-app>.fly.dev/analyze \
-  -H "Authorization: Bearer <the-API_KEY-you-just-set>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "audio_url": "https://<some-public-audio.wav>",
-    "callback_url": "https://webhook.site/<your-test-token>",
-    "callback_secret": "0123456789abcdef0123456789abcdef",
-    "metadata": {"note_id": "smoke-test"},
-    "request_id": "smoke-1"
-  }'
-```
-
-The first request after a deploy or a long idle period pays a cold-start
-latency hit (Parakeet downloads on first use, ~30–60s). Subsequent
-requests reuse the cached model on the Machine's local disk.
-
-The shipped `fly.toml` is configured for scale-to-zero with auto-suspend
-on idle and a hard concurrency limit of 1 in-flight request per Machine
-(Fly's proxy wakes additional Machines for concurrent requests, up to 3
-total). See the comments in `fly.toml` for tunable knobs.
-
----
-
-## Run locally
-
-For local development without Fly, use the CLI directly against a local
-audio file:
+For one-shot local use against an audio file on disk (no HTTP server,
+no GPU needed for the CLI path itself since the LLM extractor's
+`LLM_N_GPU_LAYERS=0` falls back to CPU when no GPU is present):
 
 ```bash
 python -m venv .venv
@@ -209,29 +148,8 @@ vsa analyze path/to/recording.wav
 vsa analyze path/to/recording.wav --out result.json
 ```
 
-Or run the same Docker image used in production:
-
-```bash
-cp .env.example .env
-# Edit .env to set API_KEY to a real value.
-
-docker compose up --build
-
-# In another terminal, serve a sample WAV so the container can fetch it:
-cd /path/to/folder/with/sample.wav
-python -m http.server 9000
-
-curl -X POST http://localhost:8080/analyze \
-  -H "Authorization: Bearer $(grep ^API_KEY= .env | cut -d= -f2)" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "audio_url": "http://host.docker.internal:9000/sample.wav",
-    "callback_url": "http://host.docker.internal:9001/cb",
-    "callback_secret": "0123456789abcdef0123456789abcdef",
-    "metadata": {"note_id": "local-dev"},
-    "request_id": "local-1"
-  }'
-```
+For production-equivalent HTTP API testing, deploy to Modal — that's
+the supported path.
 
 ---
 
@@ -279,7 +197,7 @@ with zero overhead.
 | **Parakeet TDT 0.6B** (transcription) | Lazy-downloaded from HuggingFace on first request (~2 GB). | First request after a fresh Machine pays a ~30–60s download. NeMo then loads it onto the GPU. Subsequent requests reuse the cache. |
 | **Qwen3.5-9B-Instruct Q4_K_M** (extraction) | Lazy-downloaded from HuggingFace on first request (~5.5 GB). | First request after a fresh Machine pays a ~1–2 min download. llama-cpp-python then loads it onto the GPU. Subsequent requests reuse the cache. |
 
-Both models are lazy-pulled rather than baked into the Docker image: the CUDA-enabled PyTorch and llama-cpp-python wheels already account for ~6 GB of image weight, and baking either model on top would push us over Fly's 8 GB rootfs cap. Once downloaded, the model weights persist on the Machine's local disk across auto-suspend/resume cycles, so the download cost is one-time per Machine instance (typically per deploy or per burst-scale event).
+Both models are lazy-pulled rather than baked into the Modal image. The CUDA-enabled PyTorch and llama-cpp-python wheels plus the NVIDIA CUDA base image already account for ~7 GB of image weight, and baking the models on top would slow every deploy without buying anything (Modal Volumes give us the same per-Machine persistence story with less image-rebuild cost). Once downloaded, the model weights persist on the `voice-note-hf-cache` Modal Volume across container restarts and deploys.
 
 ---
 

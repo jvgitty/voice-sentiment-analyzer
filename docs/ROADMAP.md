@@ -9,18 +9,19 @@ section so cross-references survive the eventual repo rename / split.
 
 ---
 
-## v1 — current scope
+## v1 — shipped
 
-**Goal:** fully-local transcription + LLM extraction service. HIPAA-friendly
-deployment on Fly.io shared-CPU.
+**Goal:** fully-local transcription + LLM extraction service. GPU
+deployment on Modal (HIPAA-friendly via Enterprise tier BAA when
+onboarding regulated customers).
 
 **Pipeline:**
 
 1. ffmpeg-based audio normalization (16 kHz mono PCM WAV)
 2. NeMo Parakeet transcription with chunked inference and explicit memory
    release between chunks
-3. Local LLM extraction (Qwen3.5-9B-Instruct via llama-cpp-python, GBNF
-   grammar-constrained JSON sampling)
+3. Local LLM extraction (Qwen3.5-9B-Instruct via llama-cpp-python, JSON-
+   constrained sampling)
 
 **Response shape:** transcript + structured extraction (title, summary,
 type, mood, tags, themes, people, locations, projects, businesses,
@@ -107,10 +108,9 @@ let operators choose:
   cost, marginally lower quality on edge cases. Good for high-volume
   clients or non-critical workloads.
 - **`quality` tier**: larger model, e.g. Qwen3.6-35B-A3B or comparable.
-  Requires a bigger Fly VM (`performance-4x` or higher) and accepts
-  longer wall clock in exchange for materially better extraction on
-  complex transcripts. Best paired with GPU instances if that becomes
-  an option.
+  Requires a bigger Modal GPU (A10 / L4 / A100) and accepts longer wall
+  clock in exchange for materially better extraction on complex
+  transcripts.
 
 Both tiers should expose the same JSON schema so client integrations
 don't have to branch on the model.
@@ -119,32 +119,26 @@ don't have to branch on the model.
 
 ## Operational improvements
 
-- **Cold-start latency**: bake the LLM GGUF and Parakeet weights into
-  the Docker image rather than re-downloading from HuggingFace on every
-  machine wake. The current "~4 GB pulled on each cold start" cliff
-  noted in the v0.1.1 handoff goes away once we own the bytes. Already
-  planned for v1 Phase 3 — flagged here so the same pattern applies if
-  we ever add additional models.
-- **Fly edge proxy timeout**: the v0.1.1 smoke test repeatedly hit the
-  default ~60s edge timeout on cold-started machines, returning 502 to
-  curl even when the upstream eventually delivered the webhook. Add
-  `[http_service.http_options.idle_timeout]` and/or `request_timeout`
-  in `fly.toml` so the proxy waits long enough for first-request model
-  load to complete. Small one-line PR.
-- **Health checks block** in `fly.toml` so deploys roll only after the
-  app is actually ready, eliminating the ~1-second race between proxy
-  retries and uvicorn binding.
+- **Cold-start latency reduction**: Modal `min_containers=1` keeps one
+  container warm continuously so the first request of the day doesn't
+  pay the ~3-minute model-download-from-Volume cost. Adds ongoing GPU
+  spend (~$15/day at T4 rates); only worth doing once we have customer
+  traffic that justifies it.
 - **Subprocess-per-chunk transcription**: a leftover idea from the
   sentiment-analyzer OOM saga. Spawning a fresh worker process per
-  transcription chunk guarantees full memory reclamation (no glibc
-  arena fragmentation, no NeMo internal state buildup). Trade-off is
-  the per-chunk model reload cost. Not needed at v1 since chunking +
-  malloc_trim + the 16 GB VM together cleared the OOM, but worth
-  keeping in our back pocket if any future model proves leakier than
+  transcription chunk guarantees full memory reclamation. Not needed
+  on GPU (VRAM is the bottleneck and we have headroom) but worth
+  keeping in our back pocket if a future model proves leakier than
   Parakeet.
-- **Metrics + tracing**: per-phase wall-clock and peak RSS logged at
-  the end of every `/analyze` call (env-gated). Lets us see real
-  production memory and latency without re-running smoke tests.
+- **Metrics + tracing**: per-phase wall-clock logged at the end of
+  every `/analyze` call (env-gated). Lets us see real production
+  latency without re-running smoke tests.
+- **Disable Qwen3.5 thinking mode** via the `qwen3_nonthinking.jinja`
+  chat template Smoffyy ships in the GGUF repo. The current default
+  template can leak `<think>...</think>` blocks into the LLM's output
+  on harder transcripts, which would break JSON parsing. The v1 smoke
+  test happened to produce clean JSON, but this is latent risk for
+  production traffic.
 
 ---
 
@@ -155,28 +149,27 @@ extraction was initially deployed to Fly.io's shared-CPU machines.
 That didn't work: Parakeet's chunked-inference memory grows
 monotonically with audio length on CPU, and we OOM'd at every memory
 cap we set (4 GB → 8 GB → 16 GB). We then tried Fly's GPU offering
-and discovered that Fly is no longer onboarding new GPU customers
-(see [Fly's blog post](https://fly.io/blog/wrong-about-gpu/)).
+and discovered Fly is no longer onboarding new GPU customers (see
+[Fly's blog post](https://fly.io/blog/wrong-about-gpu/)).
 
-Moved to **Modal** for the GPU runtime:
+**Shipped on Modal:**
 
 - T4 GPU at ~$0.59/hr, scale-to-zero, $30/month free credits on
   Starter plan covers early-customer beta volume.
 - Modal Enterprise tier offers BAA for HIPAA workloads — the upgrade
-  path when actually signing regulated customers.
-- Python-native deployment (`modal deploy modal_app.py`) avoids the
-  Dockerfile + fly.toml + secrets-set ceremony that bit us repeatedly
-  on Fly.
+  path when signing regulated customers.
+- Python-native deployment (`modal deploy modal_app.py`).
+- Measured cost on the first successful end-to-end smoke test: ~$0.20
+  for a 13-minute voice note. Well within target thresholds.
 
-The Fly artifacts (`fly.toml`, `Dockerfile`) are preserved in the repo
-as documentation of the failed path. Eventually they should move to
-a `legacy/` directory or be deleted.
+The Fly artifacts (`fly.toml`, `Dockerfile`, `docker-compose.yml`,
+`.env.example`) were removed in the post-pivot cleanup. v0.1.x is
+still retrievable via the `v0.1.1-archived-sentiment` git tag.
 
-When to revisit:
-- If Modal's pricing changes meaningfully, or
+When to revisit Modal:
+- If Modal's pricing changes meaningfully.
 - If a workload-shape change (e.g. always-on inference, batch
-  processing) makes RunPod / Hetzner / bare metal genuinely
-  cheaper at our scale, or
+  processing) makes RunPod / Hetzner / bare metal cheaper at scale.
 - If we want a multi-region active-active deployment Modal can't
   easily express.
 
@@ -198,8 +191,8 @@ team wants one; this is the bullet list.
   trace. PR #35 (chunking) was the real fix.
 - **MoE-on-CPU is an anti-pattern** for production webhook services.
   All experts have to be in RAM, the router causes cache misses, and
-  the architecture was designed for GPU. Stick to dense models on
-  shared-CPU Fly tiers.
+  the architecture was designed for GPU. Stick to dense models if you
+  ever drop back to CPU.
 - **Multimodal models for text-only workloads are fine** in modern
   architectures (unified vision-language training, not bolt-on
   adapters). The "capacity split hurts text quality" concern is
