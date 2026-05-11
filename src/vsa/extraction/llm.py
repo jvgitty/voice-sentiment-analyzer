@@ -17,10 +17,34 @@ JSON output is constrained two ways:
    schema (wrong types, missing required fields), this raises and the
    Pipeline records a partial-success error.
 
+Where the model file comes from
+-------------------------------
+Two paths, resolved in order on first :meth:`_load`:
+
+1. If ``LLM_MODEL_PATH`` env var is set AND points to an existing file,
+   load directly from that path. This is the "baked into the image"
+   path — operators who pre-download the GGUF at build time set this
+   to the local path.
+2. Otherwise, download the GGUF from HuggingFace via
+   :func:`huggingface_hub.hf_hub_download` using ``LLM_GGUF_REPO`` and
+   ``LLM_GGUF_FILE`` env vars. The download is cached under ``HF_HOME``
+   so subsequent loads on the same machine skip the network call.
+
+For Phase 3 of the pivot we ship with **lazy-download as the default**:
+Parakeet is baked into the Docker image (~2 GB) but Qwen's ~5.5 GB
+would push the rootfs past Fly's 8 GB cap, so we let it download on
+first request and persist across machine suspend/resume cycles.
+
 Configuration via env vars
 --------------------------
-``LLM_MODEL_PATH``       — absolute path to the GGUF file.
+``LLM_MODEL_PATH``       — absolute path to a pre-downloaded GGUF.
                            Default: ``/opt/models/qwen3.5-9b-instruct-q4_k_m.gguf``.
+                           When the file at this path doesn't exist,
+                           we fall through to the HF download.
+``LLM_GGUF_REPO``        — HuggingFace repo to pull the GGUF from.
+                           Default: ``bartowski/Qwen_Qwen3.5-9B-Instruct-GGUF``.
+``LLM_GGUF_FILE``        — Specific GGUF filename inside the repo.
+                           Default: ``Qwen_Qwen3.5-9B-Instruct-Q4_K_M.gguf``.
 ``LLM_CONTEXT_SIZE``     — context window in tokens. Default: ``8192``.
                            A 20-min transcript runs ~4-5K tokens, and the
                            system prompt is ~1K, so 8K leaves room for
@@ -39,6 +63,7 @@ from __future__ import annotations
 import gc
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 from vsa.extraction.prompt import build_system_prompt, build_user_prompt
@@ -47,6 +72,8 @@ from vsa.extraction.types import DEFAULT_FALLBACK_TYPE, VoiceNoteType
 
 
 DEFAULT_MODEL_PATH = "/opt/models/qwen3.5-9b-instruct-q4_k_m.gguf"
+DEFAULT_GGUF_REPO = "bartowski/Qwen_Qwen3.5-9B-Instruct-GGUF"
+DEFAULT_GGUF_FILE = "Qwen_Qwen3.5-9B-Instruct-Q4_K_M.gguf"
 DEFAULT_CONTEXT_SIZE = 8192
 DEFAULT_THREADS = 0  # 0 = let llama.cpp auto-detect
 DEFAULT_TEMPERATURE = 0.2
@@ -75,6 +102,32 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _resolve_gguf_path(
+    model_path: str,
+    gguf_repo: str,
+    gguf_file: str,
+) -> str:
+    """Return a usable local path to the GGUF file.
+
+    If ``model_path`` already points to an existing file, return it
+    verbatim — that's the operator's pre-baked checkpoint. Otherwise
+    pull the configured GGUF from HuggingFace via
+    :func:`huggingface_hub.hf_hub_download`; HF Hub caches under
+    ``HF_HOME`` so subsequent loads on the same machine skip the
+    network call.
+
+    Imported lazily so test environments without ``huggingface_hub``
+    available (or with no network) only fail if they actually hit the
+    download path.
+    """
+    if model_path and Path(model_path).is_file():
+        return model_path
+
+    from huggingface_hub import hf_hub_download
+
+    return hf_hub_download(repo_id=gguf_repo, filename=gguf_file)
+
+
 class LlmExtractor:
     """Local-LLM extractor returning a strict :class:`ExtractionResult`.
 
@@ -87,6 +140,12 @@ class LlmExtractor:
         self._model: Any | None = None
         self._model_path = os.environ.get(
             "LLM_MODEL_PATH", DEFAULT_MODEL_PATH
+        )
+        self._gguf_repo = os.environ.get(
+            "LLM_GGUF_REPO", DEFAULT_GGUF_REPO
+        )
+        self._gguf_file = os.environ.get(
+            "LLM_GGUF_FILE", DEFAULT_GGUF_FILE
         )
         self._context_size = _env_int(
             "LLM_CONTEXT_SIZE", DEFAULT_CONTEXT_SIZE
@@ -101,6 +160,17 @@ class LlmExtractor:
 
     def _load(self) -> Any:
         if self._model is None:
+            # Resolve the local GGUF path first — either a pre-baked
+            # file or a fresh HF download. This isolates the network
+            # path from the Llama constructor so a failed download
+            # surfaces as a clean ImportError / FileNotFoundError
+            # rather than a misleading llama-cpp error message.
+            local_gguf = _resolve_gguf_path(
+                self._model_path,
+                self._gguf_repo,
+                self._gguf_file,
+            )
+
             # Imported lazily so that simply constructing the extractor
             # (or importing this module) does not pull llama-cpp-python
             # — and through it, several hundred MB of native libs —
@@ -108,7 +178,7 @@ class LlmExtractor:
             from llama_cpp import Llama
 
             self._model = Llama(
-                model_path=self._model_path,
+                model_path=local_gguf,
                 n_ctx=self._context_size,
                 n_threads=self._threads,
                 # Force CPU. Production deployment is shared-cpu Fly; if

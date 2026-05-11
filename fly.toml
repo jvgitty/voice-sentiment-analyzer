@@ -62,38 +62,35 @@ primary_region = "iad"  # Ashburn, VA. Change to e.g. "lhr", "fra", "sjc" as nee
 [[vm]]
   # 8 shared CPUs + 16 GB RAM.
   #
-  # Memory history during v0.1.1 smoke testing:
-  #   * 4 GB OOM'd during model load.
-  #   * 8 GB / shared-cpu-4x OOM'd at 7.89 GB resident with a real
-  #     13-min voice note. Three optimization PRs walked the cause
-  #     down but didn't get under the 8 GB cap:
-  #       - PR #33: evict Parakeet + SpeechBrain caches between
-  #         pipeline phases. Correct optimization, but didn't help
-  #         this OOM because the peak happens INSIDE Parakeet's
-  #         model.transcribe() call, before any caller-level eviction
-  #         can fire.
-  #       - PR #35: chunk audio into 60s segments before calling
-  #         model.transcribe(), so per-chunk attention activations
-  #         stay bounded. Confirmed working — per-chunk peak is small.
-  #       - PR #36: malloc_trim(0) between chunks + MALLOC_ARENA_MAX=2
-  #         to fight glibc's reluctance to return free pages to the
-  #         kernel. Measurable: total-vm dropped from 17.5 GB → 16.2 GB
-  #         across 11 chunks, but RSS still hit the 8 GB cap on chunk
-  #         12 of 13 due to residual intra-arena fragmentation.
+  # v0.2 (post-pivot) memory budget:
   #
-  # Bumping to shared-cpu-8x with 16 GB is the simplest path to
-  # finishing a 13-min request (and the up-to-20-min voice notes the
-  # service is built for). Doubles per-second billing vs shared-cpu-4x,
-  # but auto_stop_machines = "suspend" means idle cost stays near zero
-  # — we only pay during the ~minutes a request is in flight. The 8
-  # extra CPU shares also let Parakeet's per-chunk transcribe finish
-  # faster, partially offsetting the higher rate.
+  #   * Parakeet TDT 0.6B weights         ~2.0 GB (always resident)
+  #   * Parakeet chunked-inference peak   ~1.5 GB (transient per chunk)
+  #   * Qwen3.5-9B-Instruct Q4_K_M        ~5.5 GB (resident once loaded)
+  #   * Qwen KV cache + activations       ~1.0 GB (transient per request)
+  #   * Python / FastAPI / system         ~0.5 GB
+  #   * Safety margin                     ~5.5 GB
+  #   ────────────────────────────────────────────
+  #   Total                              ~16.0 GB
   #
-  # 16 GB gives ~8 GB headroom over the measured 7.88 GB OOM peak.
-  # Tune lower (and revert to shared-cpu-4x) only after a future
-  # refactor materially cuts that peak — e.g. moving Parakeet to a
-  # quantized model or running each chunk in a subprocess to fully
-  # release memory between iterations.
+  # The v0.1.1 sentiment stack (NeMo + audeering wav2vec2 + SpeechBrain
+  # IEMOCAP) is gone — replaced by Parakeet + Qwen. The combined
+  # footprint is comparable but the failure mode is different: v0.1.1
+  # OOM'd at 7.89 GB inside Parakeet's whole-utterance encoder on long
+  # audio (now solved via chunked inference + malloc_trim), v0.2's
+  # peak is dominated by Qwen's resident weights.
+  #
+  # shared-cpu-8x is the smallest Fly tier that exposes 16 GB. Going
+  # bigger requires performance-Nx, which roughly doubles per-second
+  # billing — not worth it unless we move to a larger model tier.
+  # auto_stop_machines = "suspend" keeps idle cost near zero; we only
+  # pay during the ~minutes a request is actually in flight.
+  #
+  # Tune lower (down to shared-cpu-4x / 8 GB) only after a future
+  # refactor materially cuts the LLM footprint — e.g. switching to a
+  # smaller 4B-class model in the "fast" tier described in
+  # docs/ROADMAP.md, or running Parakeet in a subprocess to fully
+  # release memory before the LLM phase loads.
   cpu_kind = "shared"
   cpus = 8
   memory = "16gb"
